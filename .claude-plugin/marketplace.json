@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "beads-from-plan",
+  "version": "0.1.0",
+  "description": "Convert markdown plans into beads tasks with dependency tracking, coverage guarantees, and quality gates",
+  "owner": {
+    "name": "deligoez"
+  },
+  "plugins": [
+    {
+      "name": "beads-from-plan",
+      "description": "Converts markdown implementation plans into structured beads tasks. Ensures full plan coverage, respects dependency ordering, and includes quality gates per task.",
+      "version": "0.1.0",
+      "source": {
+        "source": "github",
+        "repo": "deligoez/beads-from-plan"
+      },
+      "category": "productivity"
+    }
+  ]
+}
