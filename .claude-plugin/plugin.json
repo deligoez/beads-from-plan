@@ -1,0 +1,18 @@
+{
+  "name": "beads-from-plan",
+  "version": "0.1.0",
+  "description": "Convert markdown plans into beads tasks with dependency tracking, coverage guarantees, and quality gates",
+  "author": {
+    "name": "deligoez"
+  },
+  "repository": "https://github.com/deligoez/beads-from-plan",
+  "keywords": [
+    "beads",
+    "task-management",
+    "planning",
+    "dependency-graph",
+    "quality-gates",
+    "markdown"
+  ],
+  "license": "MIT"
+}
