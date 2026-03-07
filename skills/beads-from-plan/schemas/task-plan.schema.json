@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Beads Task Plan",
+  "description": "Structured task plan for bd-from-plan script execution. Maps markdown plan sections to beads epics and tasks with dependency tracking.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Schema version (optional, for forward compatibility)"
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the source markdown plan file"
+    },
+    "prefix": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$",
+      "description": "Beads ID prefix for all created issues (e.g., 'auth', 'feat'). Used as: prefix-epic-task"
+    },
+    "epics": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Top-level work streams, each becoming a beads epic",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Epic ID suffix. Combined with prefix: prefix-id"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Epic title (concise, descriptive)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Epic description with context from the plan"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4,
+            "default": 2,
+            "description": "Priority 0-4 (0=highest, 4=lowest)"
+          },
+          "labels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Labels to apply to the epic"
+          },
+          "source_sections": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "Markdown heading(s) this epic maps to (e.g., '## 1. Authentication')"
+          },
+          "tasks": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Tasks within this epic, each becoming a beads task",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[a-z0-9][a-z0-9-]*$",
+                  "description": "Task ID suffix. Combined with epic: prefix-epicId-taskId"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Task title (imperative, actionable)"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Detailed task description extracted from the plan"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["task", "bug", "feature", "chore"],
+                  "default": "task",
+                  "description": "Beads issue type"
+                },
+                "priority": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4,
+                  "default": 2,
+                  "description": "Priority 0-4 (0=highest)"
+                },
+                "estimate_minutes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Time estimate in minutes"
+                },
+                "labels": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Labels to apply to this task"
+                },
+                "depends_on": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Task IDs this task depends on (same format as id: just the suffix). Can reference tasks in other epics using epicId-taskId format."
+                },
+                "source_sections": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1,
+                  "description": "Markdown heading(s) this task maps to"
+                },
+                "source_lines": {
+                  "type": "string",
+                  "pattern": "^[0-9]+-[0-9]+$",
+                  "description": "Line range in source file (e.g., '42-67')"
+                },
+                "acceptance": {
+                  "type": "string",
+                  "description": "Acceptance criteria — what 'done' looks like"
+                },
+                "quality_gate": {
+                  "type": "object",
+                  "description": "Quality checks to run after task completion",
+                  "properties": {
+                    "lint": {
+                      "type": "boolean",
+                      "description": "Run linter after completion"
+                    },
+                    "test": {
+                      "type": "boolean",
+                      "description": "Run tests after completion"
+                    },
+                    "type_check": {
+                      "type": "boolean",
+                      "description": "Run type checker after completion"
+                    },
+                    "custom": {
+                      "type": "string",
+                      "description": "Custom command to run (e.g., 'composer infection')"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "commit_strategy": {
+                  "type": "string",
+                  "enum": ["agentic-commits", "conventional", "manual"],
+                  "default": "agentic-commits",
+                  "description": "How to commit after completing this task"
+                }
+              },
+              "required": ["id", "title", "source_sections"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["id", "title", "source_sections", "tasks"],
+        "additionalProperties": false
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "Coverage report ensuring the entire plan is mapped to tasks",
+      "properties": {
+        "total_sections": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of content sections in the markdown"
+        },
+        "mapped_sections": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of sections mapped to at least one task"
+        },
+        "unmapped": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of section headings not mapped to any task. Must be empty for the plan to be valid."
+        },
+        "context_only": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Sections explicitly marked as context/overview (not requiring tasks)"
+        }
+      },
+      "required": ["total_sections", "mapped_sections", "unmapped"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["epics", "coverage"],
+  "additionalProperties": false
+}
