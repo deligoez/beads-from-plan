@@ -140,22 +140,33 @@ Done: 2 epics, 4 tasks, 3 dependencies created
 
 ---
 
-## Cross-Epic Dependencies
+## Dependency Resolution
 
-When a task in one epic depends on a task in another epic, use `epicId-taskId` format:
+The script uses **smart resolution** — it works with both formats transparently:
 
+### Same-epic dependency (just task ID):
+```json
+{
+  "id": "state-machine",
+  "depends_on": ["create"]
+}
+```
+Resolves to: `order-model-state-machine` depends on `order-model-create` (same epic `model`).
+
+### Cross-epic dependency (epicId-taskId):
 ```json
 {
   "id": "gateway",
   "depends_on": ["model-create"]
 }
 ```
+Resolves to: `order-payment-gateway` depends on `order-model-create` (cross-epic from `payment` to `model`).
 
-This resolves to: `order-payment-gateway` depends on `order-model-create`.
+### Resolution logic:
+1. Try exact match against all `epicId-taskId` combinations in the plan
+2. If no match, treat as same-epic: prepend the current epic's ID
 
-The resolution logic:
-1. If `depends_on` value contains a `-`: treat as `epicId-taskId`
-2. If no `-`: treat as `taskId` within the same epic
+This means kebab-case task IDs (e.g., `create-lock-model`) work correctly in both positions.
 
 ---
 
