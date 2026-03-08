@@ -357,7 +357,7 @@ Record the user's choices in the `workflow` field of the JSON plan:
   "workflow": {
     "quality_gate": "composer lint && composer test && composer larastan",
     "commit_strategy": "agentic-commits",
-    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer larastan\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+    "checklist_note": "- [ ] Claim before starting: bd update <task-id> --claim\n- [ ] Run quality gate: composer lint && composer test && composer larastan\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
   }
 }
 ```
@@ -609,6 +609,108 @@ This validates everything and shows what WOULD be created without actually creat
 
 ---
 
+# bd CLI Reference
+
+**CRITICAL: NEVER use `bd edit`** — it opens `$EDITOR` which blocks the agent. Use `bd update` with flags instead.
+
+## Priority Format
+
+Priorities are **integers 0–4**, never strings. Using "high" or "medium" will error.
+
+| Value | Meaning |
+|-------|---------|
+| 0 | Critical |
+| 1 | High |
+| 2 | Medium (default) |
+| 3 | Low |
+| 4 | Backlog |
+
+## Task Lifecycle
+
+After tasks are created, the agent works through them using this cycle:
+
+```
+1. FIND    →  bd ready --pretty              # What can I work on?
+2. READ    →  bd show <id>                   # Understand the task
+3. CLAIM   →  bd update <id> --claim         # Atomic claim (fails if taken)
+4. WORK    →  (implement, test, commit)
+5. CLOSE   →  bd close <id> --reason="..."   # Mark complete
+6. NEXT    →  bd ready --pretty              # What's next?
+```
+
+### Finding Work
+
+```bash
+bd ready --pretty             # Tasks with all deps satisfied (no blockers)
+bd list --status=open         # All open tasks
+bd blocked                    # Tasks waiting on dependencies
+bd search "query"             # Full-text search across all tasks
+```
+
+### Claiming and Working
+
+```bash
+bd update <id> --claim                    # Atomic claim — fails if already claimed
+bd update <id> --status=in_progress       # Manual status change
+bd update <id> --notes="progress update"  # Add notes during work
+```
+
+### Completing
+
+```bash
+bd close <id> --reason="Implemented with tests. All passing."
+bd close <id1> <id2> <id3>               # Batch close (more efficient)
+```
+
+### Issue Management
+
+```bash
+bd create "Title" --type=task --priority=2
+bd create "Title" --type=bug --parent=<epic-id>
+bd update <id> --title="New title"        # NEVER use bd edit
+bd update <id> --add-label=foo
+bd update <id> --defer="+2d"              # Hide from ready until date
+bd rename <old-id> <new-id>               # Change issue ID
+```
+
+### Dependencies
+
+```bash
+bd dep add <issue> <depends-on>           # issue depends on depends-on
+bd dep tree <id>                          # Text dependency tree
+bd graph <id> --compact                   # Visual dependency graph
+```
+
+### Epics and Hierarchy
+
+```bash
+bd epic status                            # Epic completion percentages
+bd children <id>                          # List epic's children
+```
+
+### Session End Protocol
+
+Before ending a session:
+1. `bd close` all completed tasks
+2. Check `bd ready --pretty` — report what's next
+3. `bd sync --from-main` if on an ephemeral branch
+
+## Issue Types
+
+`task` | `bug` | `feature` | `epic` | `chore`
+
+## Issue Statuses
+
+| Status | Meaning |
+|--------|---------|
+| `open` | Not started |
+| `in_progress` | Being worked on |
+| `blocked` | Waiting on dependency |
+| `deferred` | Hidden until defer date |
+| `closed` | Completed |
+
+---
+
 # Quick Reference
 
 | Command | Purpose |
@@ -617,7 +719,11 @@ This validates everything and shows what WOULD be created without actually creat
 | `bd-from-plan --dry-run plan.json` | Preview without creating |
 | `bd-from-plan --stdin < plan.json` | Read plan from stdin |
 | `bd ready --pretty` | Show next available tasks |
+| `bd show <id>` | Task details |
+| `bd update <id> --claim` | Claim a task before working |
+| `bd close <id> --reason="..."` | Complete a task |
 | `bd graph` | Dependency visualization |
 | `bd dep tree <id>` | Show task dependency tree |
 | `bd epic status` | Epic completion overview |
-| `bd show <id>` | Task details |
+| `bd blocked` | Tasks waiting on dependencies |
+| `bd search "query"` | Full-text search |
