@@ -172,9 +172,9 @@ validate_plan() {
     local atomicity_warnings
     atomicity_warnings=$(echo "$plan_json" | jq -r '
         [.epics[] | .id as $epic_id | .tasks | to_entries[] | .key as $j | .value |
-            # Rule 3: Max 45 minutes
-            (if .estimate_minutes != null and .estimate_minutes > 45 then
-                "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: estimate \(.estimate_minutes)m exceeds 45m max — split this task"
+            # Rule 3: Max 15 minutes
+            (if .estimate_minutes != null and .estimate_minutes > 15 then
+                "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: estimate \(.estimate_minutes)m exceeds 15m max — split this task"
             else empty end),
 
             # Rule 5: Count the files — source_sections > 2 suggests multiple files/concerns
@@ -202,7 +202,7 @@ validate_plan() {
     if [ -n "$atomicity_warnings" ]; then
         echo "" >&2
         echo -e "${YELLOW}${BOLD}ATOMICITY WARNINGS${NC}" >&2
-        echo -e "${YELLOW}Each task should address ONE concern, ONE file, and be completable in ≤ 45 minutes.${NC}" >&2
+        echo -e "${YELLOW}Each task should address ONE concern, ONE file, and be completable in ≤ 15 minutes.${NC}" >&2
         echo -e "${YELLOW}Apply the recursive decomposition algorithm: split until every task passes every check.${NC}" >&2
         echo "" >&2
         while IFS= read -r w; do
