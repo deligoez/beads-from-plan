@@ -156,6 +156,11 @@ create_full_plan() {
   "version": 1,
   "source": "docs/full-plan.md",
   "prefix": "full",
+  "workflow": {
+    "quality_gate": "composer lint && composer test && composer type",
+    "commit_strategy": "agentic-commits",
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit using agentic-commits"
+  },
   "epics": [
     {
       "id": "core",
@@ -177,11 +182,6 @@ create_full_plan() {
           "source_sections": ["### 1.1 Data Model"],
           "source_lines": "10-25",
           "acceptance": "Model created with migration and factory",
-          "quality_gate": {
-            "lint": true,
-            "test": true,
-            "type_check": true
-          },
           "commit_strategy": "agentic-commits"
         },
         {
@@ -195,10 +195,7 @@ create_full_plan() {
           "source_sections": ["### 1.2 Service Layer"],
           "source_lines": "26-55",
           "acceptance": "Service methods work with tests passing",
-          "quality_gate": {
-            "lint": true,
-            "test": true
-          },
+          "quality_gate": "composer lint && composer test",
           "commit_strategy": "agentic-commits"
         }
       ]
