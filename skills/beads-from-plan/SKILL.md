@@ -119,13 +119,14 @@ The script detects and rejects circular dependencies. If you find a cycle:
 
 ## Atomic Task Decomposition (STRICT)
 
-**Each task MUST be completable in a single focused session AND expressible as one commit.**
+**Each task MUST be completable by an AI agent in a single execution AND expressible as one commit.**
 
-This is the second most important rule (after 100% coverage). Over-broad tasks cause:
-- **Agent confusion** — too many concerns exhaust the context window mid-task
+This is the second most important rule (after 100% coverage). These tasks are designed for AI agent execution (including parallel agents), not human sessions. Over-broad tasks cause:
+- **Context rot** — accuracy drops 20-50% as agent context grows from 10K→100K tokens (Chroma research)
+- **Success cliff** — SWE-bench: <15 min tasks = 70%+ success, 1+ hour = 23% success
 - **Poor commits** — impossible to create atomic commits from broad tasks
 - **Tracking failure** — "50% done" tasks are invisible in beads
-- **Review difficulty** — large diffs are harder to review than small, focused ones
+- **Parallelism blocked** — coarse tasks can't be distributed across parallel agents
 
 ### Rule 1: Single Commit Test
 
@@ -151,16 +152,19 @@ If a task creates 3 new files, it should be 3 tasks.
 
 **Exception:** A source file + its direct test file = one task (they share one concern).
 
-### Rule 3: Maximum 45 Minutes
+### Rule 3: Maximum 15 Minutes
 
-**Implementation tasks MUST NOT exceed 45 minutes.**
+**Implementation tasks MUST NOT exceed 15 minutes.**
+
+Tasks are executed by AI agents, not humans. There is no minimum — a 1-minute task is perfectly valid. The goal is maximum atomicity for agent success and parallelization.
 
 | Estimate | Action |
 |----------|--------|
-| ≤ 15 min | Consider merging with a directly related task |
-| 15–45 min | Perfect granularity |
-| 46–90 min | MUST split — too broad for one focused session |
-| > 90 min | MUST split aggressively — this is multiple tasks disguised as one |
+| 1–15 min | Ideal agent task — high success rate, parallelizable |
+| 16–30 min | MUST split — agent accuracy degrades significantly |
+| > 30 min | MUST split aggressively — this is multiple tasks disguised as one |
+
+**Why 15 minutes?** Data-driven: METR shows Claude 50% success at ~50 min with non-linear degradation. SWE-bench shows <15 min tasks achieve 70%+ success. Setting the max at 15 minutes keeps each task well within the high-success zone.
 
 ### Rule 4: Verb-Object Test
 
@@ -208,7 +212,7 @@ FOR each task:
   2. Verb-Object Test → "Does the title have ONE verb + ONE object?"
   3. Noun Count → "How many distinct things am I creating?"
   4. File Count → "How many files will this create/modify?"
-  5. Time Check → "Is this ≤ 45 minutes?"
+  5. Time Check → "Is this ≤ 15 minutes?"
   6. Acceptance Count → "Are there ≤ 3 acceptance criteria?"
 
   IF any check fails:
@@ -233,30 +237,31 @@ FOR each task:
 
 Failures: Single Commit ❌, Verb-Object ❌, Noun Count ❌ (5), File Count ❌ (5+), Time ❌ (120m), Acceptance ❌ (4+)
 
-**AFTER** (5 atomic tasks):
+**AFTER** (6 atomic tasks):
 
 ```json
 [
-  {"id": "config",       "title": "Add parallel_dispatch config section",              "estimate_minutes": 15},
-  {"id": "migration",    "title": "Create machine_locks migration",                    "estimate_minutes": 15},
-  {"id": "model",        "title": "Create MachineStateLock Eloquent model",            "estimate_minutes": 15},
-  {"id": "lock-manager", "title": "Create MachineLockManager service",                 "estimate_minutes": 30},
-  {"id": "lock-handle",  "title": "Create MachineLockHandle and timeout exception",    "estimate_minutes": 20}
+  {"id": "config",       "title": "Add parallel_dispatch config section",        "estimate_minutes": 5},
+  {"id": "migration",    "title": "Create machine_locks migration",              "estimate_minutes": 5},
+  {"id": "model",        "title": "Create MachineStateLock Eloquent model",      "estimate_minutes": 10},
+  {"id": "lock-manager", "title": "Create MachineLockManager service",           "estimate_minutes": 15},
+  {"id": "lock-handle",  "title": "Create MachineLockHandle value object",       "estimate_minutes": 10},
+  {"id": "lock-ex",      "title": "Create LockTimeoutException class",           "estimate_minutes": 5}
 ]
 ```
 
-Each task: one commit, one verb, one file (or tightly coupled pair), ≤ 30 min.
+Each task: one commit, one verb, one file, ≤ 15 min. Parallelizable where dependencies allow.
 
 ### Expected Task Counts
 
-Use this as calibration — if your count is significantly below, you're under-decomposing:
+Use this as calibration — if your count is significantly below, you're under-decomposing. With 15-minute max, expect more tasks than traditional approaches:
 
 | Plan Size | Expected Tasks |
 |-----------|---------------|
-| 100 lines | 8–15 tasks |
-| 500 lines | 25–40 tasks |
-| 1000 lines | 45–70 tasks |
-| 2000 lines | 80–120 tasks |
+| 100 lines | 12–25 tasks |
+| 500 lines | 40–70 tasks |
+| 1000 lines | 70–120 tasks |
+| 2000 lines | 120–200 tasks |
 
 ## Quality Gates
 
@@ -370,15 +375,23 @@ Individual tasks can override the workflow defaults via their own `quality_gate`
 
 ## Step 1: Read the Plan
 
-Read the entire markdown file. Do NOT skip sections or skim.
+**Delegate plan reading to keep the main agent's context clean.**
 
-```bash
-# Count total lines
-wc -l plan.md
+For large plans (500+ lines), use this approach:
 
-# Read the file
-# Use the Read tool, not cat
-```
+1. **Extract headings first** — get the structural skeleton without reading content:
+   ```bash
+   grep -n '^#' plan.md
+   ```
+
+2. **Delegate full reading to a subagent** — spawn a single Agent (subagent_type: "general-purpose") with a clear prompt:
+   - Read the full plan file
+   - Extract epics, tasks, dependencies, and coverage mapping
+   - Return a structured summary (not the raw content)
+
+3. **For smaller plans (<500 lines)** — reading directly is fine, but prefer the Read tool over cat.
+
+**Why?** Large plans (2000+ lines) consume 30-50K tokens of context. Delegating to a subagent keeps the main context free for JSON generation and validation. Chunked parallel reading was tested and rejected — cross-chunk dependency loss outweighs the speed gain.
 
 ## Step 2: Extract Structure
 
@@ -461,7 +474,7 @@ cat > "$PLAN_FILE" << 'PLAN_EOF'
           "description": "Define User model with email, password_hash, timestamps. Create migration with proper indexes.",
           "type": "feature",
           "priority": 1,
-          "estimate_minutes": 45,
+          "estimate_minutes": 10,
           "labels": ["model"],
           "depends_on": [],
           "source_sections": ["### 1.1 User Model"],
@@ -475,7 +488,7 @@ cat > "$PLAN_FILE" << 'PLAN_EOF'
           "description": "POST /api/login accepts email+password, returns JWT. Validates credentials against User model.",
           "type": "feature",
           "priority": 1,
-          "estimate_minutes": 90,
+          "estimate_minutes": 15,
           "depends_on": ["user-model"],
           "source_sections": ["### 1.2 Login Flow", "#### 1.2.1 JWT Tokens"],
           "source_lines": "43-98",
