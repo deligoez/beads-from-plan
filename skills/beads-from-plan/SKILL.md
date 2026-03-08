@@ -31,7 +31,9 @@ Use the base directory provided at skill activation to construct the full path:
 
 ```bash
 # The base directory is shown as "Base directory for this skill: <path>" when the skill loads.
-<base_directory>/scripts/bd-from-plan /tmp/task-plan.json
+# Always use mktemp to avoid path collisions between concurrent runs.
+PLAN_FILE=$(mktemp /tmp/task-plan-XXXXXX.json)
+<base_directory>/scripts/bd-from-plan "$PLAN_FILE"
 ```
 
 ---
@@ -52,7 +54,7 @@ Markdown Plan (2000+ lines)
    - Verify 100% section coverage
         |
         v
-  JSON Task Plan (/tmp/task-plan.json)
+  JSON Task Plan (mktemp /tmp/task-plan-XXXXXX.json)
    - Structured epics and tasks
    - Dependency graph
    - Quality gates per task
@@ -298,7 +300,8 @@ Create a table mapping EVERY heading to a task or `context_only`:
 Write the JSON plan following the schema at `schemas/task-plan.schema.json`.
 
 ```bash
-cat > /tmp/task-plan.json << 'PLAN_EOF'
+PLAN_FILE=$(mktemp /tmp/task-plan-XXXXXX.json)
+cat > "$PLAN_FILE" << 'PLAN_EOF'
 {
   "version": 1,
   "source": "docs/plans/feature-x.md",
@@ -360,7 +363,7 @@ PLAN_EOF
 ## Step 6: Execute Plan
 
 ```bash
-<base_directory>/scripts/bd-from-plan /tmp/task-plan.json
+<base_directory>/scripts/bd-from-plan "$PLAN_FILE"
 ```
 
 The script will:
@@ -390,11 +393,11 @@ Validate an existing plan JSON against its source markdown.
 
 ```bash
 # Read the plan JSON
-cat /tmp/task-plan.json | jq .
+cat "$PLAN_FILE" | jq .
 
 # Read the source markdown
 # Extract the source path from the plan
-SOURCE=$(cat /tmp/task-plan.json | jq -r '.source')
+SOURCE=$(cat "$PLAN_FILE" | jq -r '.source')
 ```
 
 ## Step 2: Extract Markdown Headings
@@ -452,7 +455,7 @@ Keep IDs short but descriptive. Avoid abbreviations that aren't obvious.
 Always do a dry run first for large plans:
 
 ```bash
-<base_directory>/scripts/bd-from-plan --dry-run /tmp/task-plan.json
+<base_directory>/scripts/bd-from-plan --dry-run "$PLAN_FILE"
 ```
 
 This validates everything and shows what WOULD be created without actually creating anything.
