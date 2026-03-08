@@ -185,7 +185,7 @@ Fix: Add tasks for these sections or mark them as context_only
 ## Dry Run Output
 
 ```bash
-bd-from-plan --dry-run /tmp/task-plan.json
+bd-from-plan --dry-run "$PLAN_FILE"
 ```
 
 ```
