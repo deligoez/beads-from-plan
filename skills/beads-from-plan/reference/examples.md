@@ -38,7 +38,7 @@ Depends on payment gateway integration.
   "workflow": {
     "quality_gate": "composer lint && composer test && composer type",
     "commit_strategy": "agentic-commits",
-    "checklist_note": "- [ ] Claim before starting: bd update <task-id> --claim\n- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit using agentic-commits"
   },
   "epics": [
     {
