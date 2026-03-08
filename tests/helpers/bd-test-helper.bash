@@ -190,7 +190,7 @@ create_full_plan() {
           "description": "Service class with business logic",
           "type": "feature",
           "priority": 1,
-          "estimate_minutes": 90,
+          "estimate_minutes": 45,
           "depends_on": ["model"],
           "source_sections": ["### 1.2 Service Layer"],
           "source_lines": "26-55",
@@ -326,9 +326,9 @@ EOF
 # Create a plan with atomicity violations (should warn)
 create_atomicity_warning_plan() {
     local plan_file="${1:-${REPO}/plan.json}"
-    # Generate a long description (> 500 chars)
+    # Generate a long description (> 300 chars)
     local long_desc
-    long_desc=$(printf 'x%.0s' $(seq 1 550))
+    long_desc=$(printf 'x%.0s' $(seq 1 350))
     cat > "$plan_file" << EOF
 {
   "version": 1,
@@ -342,17 +342,17 @@ create_atomicity_warning_plan() {
       "tasks": [
         {
           "id": "too-big",
-          "title": "Overly large task",
+          "title": "Create config and migration and model",
           "description": "${long_desc}",
-          "estimate_minutes": 180,
-          "source_sections": ["### 1.1 A", "### 1.2 B", "### 1.3 C", "### 1.4 D"]
+          "estimate_minutes": 90,
+          "source_sections": ["### 1.1 A", "### 1.2 B", "### 1.3 C"]
         }
       ]
     }
   ],
   "coverage": {
-    "total_sections": 6,
-    "mapped_sections": 5,
+    "total_sections": 5,
+    "mapped_sections": 4,
     "unmapped": [],
     "context_only": ["# Title"]
   }
