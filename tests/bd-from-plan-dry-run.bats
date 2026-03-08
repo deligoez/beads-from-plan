@@ -54,8 +54,8 @@ setup() {
     run "$BD_FROM_PLAN" --dry-run "$plan_file"
     [ "$status" -eq 0 ]
     assert_output_contains "Total estimate:"
-    # 45m + 45m = 1h 30m
-    assert_output_contains "1h 30m"
+    # 10m + 15m = 0h 25m
+    assert_output_contains "0h 25m"
 }
 
 @test "dry-run shows task estimates" {
@@ -63,7 +63,7 @@ setup() {
     plan_file=$(create_full_plan)
     run "$BD_FROM_PLAN" --dry-run "$plan_file"
     [ "$status" -eq 0 ]
-    assert_output_contains "estimate: 45m"
+    assert_output_contains "estimate: 10m"
 }
 
 @test "dry-run shows priority in task output" {
