@@ -90,7 +90,7 @@ See [schemas/task-plan.schema.json](skills/beads-from-plan/schemas/task-plan.sch
           "title": "Create User model",
           "depends_on": [],
           "source_sections": ["### 1.1 User Model"],
-          "quality_gate": {"lint": true, "test": true},
+          "quality_gate": "composer lint && composer test",
           "commit_strategy": "agentic-commits"
         }
       ]
