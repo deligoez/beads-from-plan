@@ -462,7 +462,8 @@ create_task() {
         full_description="${full_description}\n\n---\nChecklist:\n${checklist_note}"
     fi
 
-    # Always append bd close reminder
+    # Always append claim and close reminders with real task ID
+    full_description="${full_description}\n- [ ] Claim before starting: bd update ${target_id} --claim"
     full_description="${full_description}\n- [ ] Close this task when done: bd close ${target_id}"
 
     if [ "$DRY_RUN" -eq 1 ]; then
