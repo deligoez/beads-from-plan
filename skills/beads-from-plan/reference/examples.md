@@ -54,7 +54,7 @@ Depends on payment gateway integration.
           "description": "Define Order model with status, total, customer_id fields. Create migration with proper indexes.",
           "type": "feature",
           "priority": 1,
-          "estimate_minutes": 45,
+          "estimate_minutes": 10,
           "depends_on": [],
           "source_sections": ["### 1.1 Create Order Model"],
           "source_lines": "7-10",
@@ -67,7 +67,7 @@ Depends on payment gateway integration.
           "description": "State machine for order lifecycle: pending -> confirmed -> shipped -> delivered",
           "type": "feature",
           "priority": 1,
-          "estimate_minutes": 90,
+          "estimate_minutes": 15,
           "depends_on": ["create"],
           "source_sections": ["### 1.2 Order Status Machine"],
           "source_lines": "12-15",
@@ -89,7 +89,7 @@ Depends on payment gateway integration.
           "description": "Integrate Stripe payment gateway. Requires Order model to exist.",
           "type": "feature",
           "priority": 2,
-          "estimate_minutes": 120,
+          "estimate_minutes": 15,
           "depends_on": ["model-create"],
           "source_sections": ["### 2.1 Payment Gateway"],
           "source_lines": "17-19",
@@ -102,7 +102,7 @@ Depends on payment gateway integration.
           "description": "Handle Stripe webhook callbacks for payment confirmation. Depends on payment gateway.",
           "type": "feature",
           "priority": 2,
-          "estimate_minutes": 60,
+          "estimate_minutes": 10,
           "depends_on": ["gateway"],
           "source_sections": ["### 2.2 Payment Webhooks"],
           "source_lines": "21-23",
@@ -203,22 +203,22 @@ Epics (2):
 
 Tasks (4, topological order):
   [1] order-model-create: Create Order model and migration
-      Type: feature | Priority: P1 | Est: 45m
+      Type: feature | Priority: P1 | Est: 10m
       Deps: (none)
       Gate: composer lint && composer test && composer type
 
   [2] order-model-state-machine: Implement order status state machine
-      Type: feature | Priority: P1 | Est: 90m
+      Type: feature | Priority: P1 | Est: 15m
       Deps: order-model-create
       Gate: composer lint && composer test && composer type
 
   [3] order-payment-gateway: Integrate Stripe payment gateway
-      Type: feature | Priority: P2 | Est: 120m
+      Type: feature | Priority: P2 | Est: 15m
       Deps: order-model-create
       Gate: composer lint && composer test && composer type
 
   [4] order-payment-webhooks: Handle Stripe payment webhooks
-      Type: feature | Priority: P2 | Est: 60m
+      Type: feature | Priority: P2 | Est: 10m
       Deps: order-payment-gateway
       Gate: composer lint && composer test
 
@@ -231,5 +231,5 @@ Dependencies (3):
 
 No cycles detected.
 
-Total estimate: 5h 15m
+Total estimate: 50m
 ```
