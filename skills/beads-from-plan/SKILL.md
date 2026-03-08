@@ -125,15 +125,24 @@ The script detects and rejects circular dependencies. If you find a cycle:
 
 ## Quality Gates
 
-Every task SHOULD have a quality gate. Choose based on task type:
+The quality gate is a **single executable command** that combines all quality checks for the project. The agent discovers available commands from the project (composer.json, package.json, Makefile, CI config) and combines them with `&&`.
 
-| Task Type | Recommended Gate |
-|-----------|-----------------|
-| New code | `{"lint": true, "test": true, "type_check": true}` |
-| Refactoring | `{"lint": true, "test": true}` |
-| Configuration | `{"lint": true}` |
-| Documentation | No gate needed |
-| Bug fix | `{"test": true}` |
+Examples:
+```
+# PHP/Laravel project
+composer lint && composer test && composer larastan
+
+# Node.js project
+npm run lint && npm run test && npm run typecheck
+
+# Python project
+ruff check . && pytest && mypy .
+
+# Documentation-only tasks (no gate)
+(leave quality_gate empty)
+```
+
+The agent MUST verify the quality gate command runs successfully before including it in the plan.
 
 ## Commit Strategy
 
@@ -148,6 +157,81 @@ Reference `agentic-commits` for atomic commit discipline. Each task completion s
 ---
 
 # MODE 1: DECOMPOSE
+
+## Step 0: Ask User Preferences (MANDATORY)
+
+**Before reading the plan, ask the user two questions.** Do NOT skip this step.
+
+### Question 1: Quality Gate Command
+
+Ask: "What quality check commands should run after each task?"
+
+**Discovery approach:** First, try to discover existing quality commands from the project:
+- Check `composer.json` scripts (e.g., `lint`, `test`, `larastan`, `infection`)
+- Check `package.json` scripts (e.g., `lint`, `test`, `typecheck`)
+- Check `Makefile` targets
+- Check CI config (`.github/workflows/`, `.gitlab-ci.yml`)
+
+Present discovered commands to the user, or ask them to specify:
+```
+I found these quality commands in your project:
+  - composer lint
+  - composer test
+  - composer larastan
+
+Should I combine all of these as the quality gate, or do you want to customize?
+```
+
+The quality gate is a **single executable command** — combine multiple checks with `&&`:
+```
+composer lint && composer test && composer larastan
+```
+
+### Step 0.5: Verify Quality Gate Command (MANDATORY)
+
+**Before generating the JSON plan, RUN the quality gate command** to verify it works:
+
+```bash
+# Run the combined command
+composer lint && composer test && composer larastan
+```
+
+If the command fails:
+- Ask the user to fix the issue or adjust the command
+- Do NOT proceed with JSON generation until the command succeeds
+- This prevents writing a broken command into every task
+
+### Question 2: Commit Strategy
+
+Ask: "How should completed tasks be committed?"
+
+Present options:
+```
+Commit Strategy options:
+  [1] agentic-commits — atomic, one-file-per-commit, structured format (recommended)
+  [2] conventional — conventional commit messages (feat:, fix:, etc.)
+  [3] manual — no auto-commit, handle manually
+```
+
+### Store in JSON
+
+Record the user's choices in the `workflow` field of the JSON plan:
+
+```json
+{
+  "workflow": {
+    "quality_gate": "composer lint && composer test && composer larastan",
+    "commit_strategy": "agentic-commits",
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer larastan\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+  }
+}
+```
+
+The `checklist_note` is a human-readable summary of the workflow. The script appends it to every task's description as a checklist.
+
+Individual tasks can override the workflow defaults via their own `quality_gate` and `commit_strategy` fields. If not overridden, the workflow defaults apply.
+
+---
 
 ## Step 1: Read the Plan
 
@@ -219,6 +303,11 @@ cat > /tmp/task-plan.json << 'PLAN_EOF'
   "version": 1,
   "source": "docs/plans/feature-x.md",
   "prefix": "feat",
+  "workflow": {
+    "quality_gate": "composer lint && composer test && composer type",
+    "commit_strategy": "agentic-commits",
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+  },
   "epics": [
     {
       "id": "auth",
@@ -240,11 +329,6 @@ cat > /tmp/task-plan.json << 'PLAN_EOF'
           "source_sections": ["### 1.1 User Model"],
           "source_lines": "15-42",
           "acceptance": "User model exists with migration. Factory and seeder work. PHPStan passes.",
-          "quality_gate": {
-            "lint": true,
-            "test": true,
-            "type_check": true
-          },
           "commit_strategy": "agentic-commits"
         },
         {
@@ -258,11 +342,6 @@ cat > /tmp/task-plan.json << 'PLAN_EOF'
           "source_sections": ["### 1.2 Login Flow", "#### 1.2.1 JWT Tokens"],
           "source_lines": "43-98",
           "acceptance": "Login endpoint returns valid JWT. Invalid credentials return 401. Tests pass.",
-          "quality_gate": {
-            "lint": true,
-            "test": true,
-            "type_check": true
-          },
           "commit_strategy": "agentic-commits"
         }
       ]
