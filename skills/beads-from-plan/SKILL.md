@@ -357,7 +357,7 @@ Record the user's choices in the `workflow` field of the JSON plan:
   "workflow": {
     "quality_gate": "composer lint && composer test && composer larastan",
     "commit_strategy": "agentic-commits",
-    "checklist_note": "- [ ] Claim before starting: bd update <task-id> --claim\n- [ ] Run quality gate: composer lint && composer test && composer larastan\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer larastan\n- [ ] Commit using agentic-commits"
   }
 }
 ```
