@@ -240,13 +240,17 @@ check_cycles() {
 
     local cycle_result
     cycle_result=$(echo "$plan_json" | jq -r '
+        # Build lookup of all full_ids for smart resolution
+        [.epics[] | .id as $eid | .tasks[] | "\($eid)-\(.id)"] as $all_ids |
+
         # Build adjacency list: task full-id -> [dependency full-ids]
         [.epics[] | .id as $eid | .tasks[] |
             {
                 id: "\($eid)-\(.id)",
-                deps: [(.depends_on // [])[] |
-                    if contains("-") then .
-                    else "\($eid)-\(.)"
+                deps: [(.depends_on // [])[] | . as $dep |
+                    # Smart resolution: exact match first, then same-epic fallback
+                    if ($all_ids | any(. == $dep)) then $dep
+                    else "\($eid)-\($dep)"
                     end
                 ]
             }
@@ -290,15 +294,19 @@ topological_sort() {
     local plan_json="$1"
 
     echo "$plan_json" | jq -r '
+        # Build lookup of all full_ids for smart resolution
+        [.epics[] | .id as $eid | .tasks[] | "\($eid)-\(.id)"] as $all_ids |
+
         # Build task list with resolved deps
         [.epics[] | .id as $eid | .tasks[] |
             {
                 full_id: "\($eid)-\(.id)",
                 epic_id: $eid,
                 task_id: .id,
-                deps: [(.depends_on // [])[] |
-                    if contains("-") then .
-                    else "\($eid)-\(.)"
+                deps: [(.depends_on // [])[] | . as $dep |
+                    # Smart resolution: exact match first, then same-epic fallback
+                    if ($all_ids | any(. == $dep)) then $dep
+                    else "\($eid)-\($dep)"
                     end
                 ]
             }
@@ -307,9 +315,9 @@ topological_sort() {
         # Kahn algorithm
         . as $all |
         ($all | map({(.full_id): .deps}) | add // {}) as $adj |
-        ($all | map(.full_id)) as $all_ids |
+        ($all | map(.full_id)) as $all_ids2 |
 
-        {remaining: $all_ids, sorted: [], adj: $adj} |
+        {remaining: $all_ids2, sorted: [], adj: $adj} |
         until(.remaining | length == 0;
             (.sorted) as $done |
             (.remaining | map(
@@ -326,24 +334,37 @@ topological_sort() {
                 .remaining = ([.remaining[] | select(. as $id | $ready | all(. != $id))])
             end
         ) |
-        .sorted | join(" ")
+        # Use :: separator so bash can split epic_id from task_id reliably
+        [.sorted[] | . as $fid |
+            ($all | map(select(.full_id == $fid)) | .[0]) |
+            "\(.epic_id)::\(.task_id)"
+        ] | join(" ")
     '
 }
 
 # --- Task Creation ---
 
 # Resolve a dependency reference to a full beads ID
-# Args: $1 = dep ref, $2 = current epic ID, $3 = plan prefix
+# Uses smart resolution: exact match against all full_ids first, then same-epic fallback
+# Args: $1 = dep ref, $2 = current epic ID, $3 = plan prefix, $4 = plan JSON
 resolve_dep_id() {
     local dep_ref="$1"
     local current_epic="$2"
     local plan_prefix="$3"
+    local plan_json="$4"
 
-    if [[ "$dep_ref" == *-* ]]; then
-        # Cross-epic reference: epicId-taskId
+    # Check if dep_ref exactly matches any epicId-taskId in the plan
+    local is_exact
+    is_exact=$(echo "$plan_json" | jq -r --arg dep "$dep_ref" '
+        [.epics[] | .id as $eid | .tasks[] | "\($eid)-\(.id)"] |
+        if any(. == $dep) then "yes" else "no" end
+    ')
+
+    if [ "$is_exact" = "yes" ]; then
+        # Exact match: dep_ref is already epicId-taskId
         echo "${BEADS_PREFIX}-${plan_prefix}-${dep_ref}"
     else
-        # Same-epic reference: taskId
+        # Same-epic fallback: prepend current epic ID
         echo "${BEADS_PREFIX}-${plan_prefix}-${current_epic}-${dep_ref}"
     fi
 }
@@ -550,7 +571,7 @@ wire_dependencies() {
 
     while IFS= read -r dep_ref; do
         local dep_full_id
-        dep_full_id=$(resolve_dep_id "$dep_ref" "$epic_id" "$plan_prefix")
+        dep_full_id=$(resolve_dep_id "$dep_ref" "$epic_id" "$plan_prefix" "$plan_json")
 
         if [ "$DRY_RUN" -eq 1 ]; then
             echo -e "  ${DIM}[dry-run]${NC} bd dep add ${full_id} ${dep_full_id}"
@@ -604,8 +625,9 @@ process_plan() {
 
     for full_task_ref in $sorted_tasks; do
         local epic_id task_id
-        epic_id="${full_task_ref%%-*}"
-        task_id="${full_task_ref#*-}"
+        # Uses :: separator from topological_sort to reliably split epic/task
+        epic_id="${full_task_ref%%::*}"
+        task_id="${full_task_ref#*::}"
 
         create_task "$plan_json" "$epic_id" "$task_id"
     done
@@ -615,8 +637,9 @@ process_plan() {
     local has_deps=0
     for full_task_ref in $sorted_tasks; do
         local epic_id task_id
-        epic_id="${full_task_ref%%-*}"
-        task_id="${full_task_ref#*-}"
+        # Uses :: separator from topological_sort to reliably split epic/task
+        epic_id="${full_task_ref%%::*}"
+        task_id="${full_task_ref#*::}"
 
         local task_deps
         task_deps=$(echo "$plan_json" | jq --arg eid "$epic_id" --arg tid "$task_id" '
