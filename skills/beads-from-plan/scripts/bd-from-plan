@@ -418,25 +418,23 @@ create_task() {
     # Build enriched description
     local full_description="$description"
 
-    local gate_info
-    gate_info=$(echo "$task_json" | jq -r '
-        if .quality_gate != null then
-            [
-                if .quality_gate.lint == true then "lint" else empty end,
-                if .quality_gate.test == true then "test" else empty end,
-                if .quality_gate.type_check == true then "type_check" else empty end,
-                if .quality_gate.custom != null then "custom: " + .quality_gate.custom else empty end
-            ] | if length > 0 then "\nQuality Gate: " + join(", ") else "" end
-        else "" end
+    # Resolve quality gate: task-level string overrides workflow-level string
+    local quality_gate
+    quality_gate=$(echo "$task_json" | jq -r --argjson plan "$plan_json" '
+        .quality_gate // $plan.workflow.quality_gate // empty
     ')
-    if [ -n "$gate_info" ]; then
-        full_description="${full_description}${gate_info}"
+    if [ -n "$quality_gate" ]; then
+        full_description="${full_description}\nQuality Gate: ${quality_gate}"
     fi
 
+    # Resolve commit strategy: task-level overrides workflow-level
     local commit_strategy
-    commit_strategy=$(echo "$task_json" | jq -r '.commit_strategy // "agentic-commits"')
+    commit_strategy=$(echo "$task_json" | jq -r --argjson plan "$plan_json" '
+        .commit_strategy // $plan.workflow.commit_strategy // "agentic-commits"
+    ')
     full_description="${full_description}\nCommit Strategy: ${commit_strategy}"
 
+    # Source reference
     local source_lines source_sections
     source_lines=$(echo "$task_json" | jq -r '.source_lines // empty')
     source_sections=$(echo "$task_json" | jq -r '(.source_sections // []) | join(", ")')
@@ -446,6 +444,16 @@ create_task() {
             full_description="${full_description} (lines ${source_lines})"
         fi
     fi
+
+    # Append workflow checklist at the end of every task description
+    local checklist_note
+    checklist_note=$(echo "$plan_json" | jq -r '.workflow.checklist_note // empty')
+    if [ -n "$checklist_note" ]; then
+        full_description="${full_description}\n\n---\nChecklist:\n${checklist_note}"
+    fi
+
+    # Always append bd close reminder
+    full_description="${full_description}\n- [ ] Close this task when done: bd close ${target_id}"
 
     if [ "$DRY_RUN" -eq 1 ]; then
         local dep_list
