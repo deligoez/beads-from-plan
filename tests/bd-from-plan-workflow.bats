@@ -183,6 +183,37 @@ EOF
     [[ "$desc2" == *"bd close ${task2}"* ]]
 }
 
+# --- BD Claim Reminder ---
+
+@test "bd claim reminder is always appended to task description" {
+    local plan_file
+    plan_file=$(create_minimal_plan)
+    run "$BD_FROM_PLAN" "$plan_file"
+    [ "$status" -eq 0 ]
+
+    local task_id="${BD_PREFIX}-test-core-setup"
+    local desc
+    desc=$(bd show "$task_id" 2>/dev/null)
+    [[ "$desc" == *"bd update ${task_id} --claim"* ]]
+}
+
+@test "bd claim reminder includes correct task ID for each task" {
+    local plan_file
+    plan_file=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" "$plan_file"
+    [ "$status" -eq 0 ]
+
+    local task1="${BD_PREFIX}-dep-model-user"
+    local desc1
+    desc1=$(bd show "$task1" 2>/dev/null)
+    [[ "$desc1" == *"bd update ${task1} --claim"* ]]
+
+    local task2="${BD_PREFIX}-dep-model-token"
+    local desc2
+    desc2=$(bd show "$task2" 2>/dev/null)
+    [[ "$desc2" == *"bd update ${task2} --claim"* ]]
+}
+
 # --- Full Workflow in Dry Run ---
 
 @test "dry-run shows workflow info" {
