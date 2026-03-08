@@ -172,19 +172,29 @@ validate_plan() {
     local atomicity_warnings
     atomicity_warnings=$(echo "$plan_json" | jq -r '
         [.epics[] | .id as $epic_id | .tasks | to_entries[] | .key as $j | .value |
-            # Warn if estimate > 120 minutes
-            (if .estimate_minutes != null and .estimate_minutes > 120 then
-                "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: estimate \(.estimate_minutes)m exceeds 120m max — split this task"
+            # Rule 3: Max 45 minutes
+            (if .estimate_minutes != null and .estimate_minutes > 45 then
+                "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: estimate \(.estimate_minutes)m exceeds 45m max — split this task"
             else empty end),
 
-            # Warn if too many source sections (> 3 suggests mixed concerns)
-            (if .source_sections != null and (.source_sections | length) > 3 then
+            # Rule 5: Count the files — source_sections > 2 suggests multiple files/concerns
+            (if .source_sections != null and (.source_sections | length) > 2 then
                 "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: maps to \(.source_sections | length) sections — likely combines multiple concerns"
             else empty end),
 
-            # Warn if description is too long (> 500 chars suggests too much scope)
-            (if .description != null and (.description | length) > 500 then
+            # Scope check: description > 300 chars suggests too much scope
+            (if .description != null and (.description | length) > 300 then
                 "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: description is \(.description | length) chars — task scope may be too broad"
+            else empty end),
+
+            # Rule 4: Verb-Object Test — title contains conjunctions suggesting multiple concerns
+            (if .title != null and (.title | test("\\band\\b|,|\\+")) then
+                "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: title contains conjunctions (and/,/+) — likely combines multiple concerns"
+            else empty end),
+
+            # Rule 7: Noun Count — title is too long (> 8 words suggests mixed concerns)
+            (if .title != null and (.title | split(" ") | length) > 8 then
+                "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: title is \(.title | split(" ") | length) words — simplify or split"
             else empty end)
         ] | .[]
     ' 2>/dev/null) || true
@@ -192,8 +202,8 @@ validate_plan() {
     if [ -n "$atomicity_warnings" ]; then
         echo "" >&2
         echo -e "${YELLOW}${BOLD}ATOMICITY WARNINGS${NC}" >&2
-        echo -e "${YELLOW}Each task should address ONE concern and be completable in 30-120 minutes.${NC}" >&2
-        echo -e "${YELLOW}Tasks that violate this will be harder to track, review, and commit cleanly.${NC}" >&2
+        echo -e "${YELLOW}Each task should address ONE concern, ONE file, and be completable in ≤ 45 minutes.${NC}" >&2
+        echo -e "${YELLOW}Apply the recursive decomposition algorithm: split until every task passes every check.${NC}" >&2
         echo "" >&2
         while IFS= read -r w; do
             echo -e "${YELLOW}!!${NC} $w" >&2
