@@ -111,6 +111,17 @@ Ask for each task:
 
 If the answer to both is "nothing" -> no dependencies.
 
+### Dependency Format
+
+The script uses **smart resolution** — both formats work transparently:
+
+| Dependency Type | Format | Example |
+|----------------|--------|---------|
+| Same-epic | Just task ID | `"depends_on": ["create-model"]` |
+| Cross-epic | `epicId-taskId` | `"depends_on": ["model-create-model"]` |
+
+Resolution: tries exact match against all `epicId-taskId` first, then falls back to same-epic.
+
 ### Circular Dependencies
 
 The script detects and rejects circular dependencies. If you find a cycle:
