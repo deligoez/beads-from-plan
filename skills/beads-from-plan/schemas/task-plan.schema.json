@@ -18,6 +18,27 @@
       "pattern": "^[a-z][a-z0-9]*$",
       "description": "Beads ID prefix for all created issues (e.g., 'auth', 'feat'). Used as: prefix-epic-task"
     },
+    "workflow": {
+      "type": "object",
+      "description": "Project-wide defaults for quality gates and commit strategy. Individual tasks inherit these unless they override.",
+      "properties": {
+        "quality_gate": {
+          "type": "string",
+          "description": "Single executable command that runs all quality checks (e.g., 'composer lint && composer test && composer type'). The agent MUST verify this command runs successfully before generating the plan."
+        },
+        "commit_strategy": {
+          "type": "string",
+          "enum": ["agentic-commits", "conventional", "manual"],
+          "default": "agentic-commits",
+          "description": "Default commit strategy for all tasks"
+        },
+        "checklist_note": {
+          "type": "string",
+          "description": "Human-readable workflow summary appended to every task description as a checklist. Should include quality gate steps, commit instructions, and bd close reminder."
+        }
+      },
+      "additionalProperties": false
+    },
     "epics": {
       "type": "array",
       "minItems": 1,
@@ -124,27 +145,8 @@
                   "description": "Acceptance criteria — what 'done' looks like"
                 },
                 "quality_gate": {
-                  "type": "object",
-                  "description": "Quality checks to run after task completion",
-                  "properties": {
-                    "lint": {
-                      "type": "boolean",
-                      "description": "Run linter after completion"
-                    },
-                    "test": {
-                      "type": "boolean",
-                      "description": "Run tests after completion"
-                    },
-                    "type_check": {
-                      "type": "boolean",
-                      "description": "Run type checker after completion"
-                    },
-                    "custom": {
-                      "type": "string",
-                      "description": "Custom command to run (e.g., 'composer infection')"
-                    }
-                  },
-                  "additionalProperties": false
+                  "type": "string",
+                  "description": "Overrides workflow-level quality gate for this task. Single executable command."
                 },
                 "commit_strategy": {
                   "type": "string",
