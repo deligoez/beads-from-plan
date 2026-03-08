@@ -32,7 +32,10 @@ Use the base directory provided at skill activation to construct the full path:
 ```bash
 # The base directory is shown as "Base directory for this skill: <path>" when the skill loads.
 # Always use mktemp to avoid path collisions between concurrent runs.
-PLAN_FILE=$(mktemp /tmp/task-plan-XXXXXX.json)
+# macOS mktemp doesn't support suffixes, so create then rename.
+_tmp=$(mktemp /tmp/task-plan-XXXXXXXX)
+PLAN_FILE="${_tmp}.json"
+mv "$_tmp" "$PLAN_FILE"
 <base_directory>/scripts/bd-from-plan "$PLAN_FILE"
 ```
 
@@ -54,7 +57,7 @@ Markdown Plan (2000+ lines)
    - Verify 100% section coverage
         |
         v
-  JSON Task Plan (mktemp /tmp/task-plan-XXXXXX.json)
+  JSON Task Plan (mktemp + rename to .json)
    - Structured epics and tasks
    - Dependency graph
    - Quality gates per task
@@ -114,16 +117,146 @@ The script detects and rejects circular dependencies. If you find a cycle:
 - Break it by splitting one task into two
 - The setup part has no dependency, the integration part depends on the other
 
-## Task Granularity
+## Atomic Task Decomposition (STRICT)
 
-**Each task should be completable in a single focused session (30-120 minutes).**
+**Each task MUST be completable in a single focused session AND expressible as one commit.**
 
-| If a section implies... | Then... |
-|------------------------|---------|
-| < 30 min of work | Consider merging with a related task |
-| 30-120 min of work | Perfect granularity |
-| > 120 min of work | Split into sub-tasks |
-| Multiple unrelated concerns | Split by concern |
+This is the second most important rule (after 100% coverage). Over-broad tasks cause:
+- **Agent confusion** — too many concerns exhaust the context window mid-task
+- **Poor commits** — impossible to create atomic commits from broad tasks
+- **Tracking failure** — "50% done" tasks are invisible in beads
+- **Review difficulty** — large diffs are harder to review than small, focused ones
+
+### Rule 1: Single Commit Test
+
+**If you can't describe the task's output in ONE commit message, split it.**
+
+| Task Title | Commit Message | Result |
+|-----------|---------------|--------|
+| "Create User model" | `feat(User): create model with migration` | PASS |
+| "Create config, migration, model, service" | Can't fit in one message | FAIL — split into 4 |
+
+### Rule 2: One File Rule
+
+**Each new file creation = separate task.**
+
+If a task creates 3 new files, it should be 3 tasks.
+
+| Files Created | Tasks | Why |
+|--------------|-------|-----|
+| `Model.php` | 1 task | Single file |
+| `Model.php` + `ModelTest.php` | 1 task | Code + its test = one concern |
+| `Model.php` + `Migration.php` + `Factory.php` | 3 tasks | Different concerns |
+| `Service.php` + `ServiceInterface.php` | 1 task | Compile-time dependency |
+
+**Exception:** A source file + its direct test file = one task (they share one concern).
+
+### Rule 3: Maximum 45 Minutes
+
+**Implementation tasks MUST NOT exceed 45 minutes.**
+
+| Estimate | Action |
+|----------|--------|
+| ≤ 15 min | Consider merging with a directly related task |
+| 15–45 min | Perfect granularity |
+| 46–90 min | MUST split — too broad for one focused session |
+| > 90 min | MUST split aggressively — this is multiple tasks disguised as one |
+
+### Rule 4: Verb-Object Test
+
+**A good task title has ONE verb and ONE object.**
+
+| Title | Analysis | Result |
+|-------|----------|--------|
+| "Create MachineStateLock model" | create + model | PASS |
+| "Add config and create migration" | add + config, create + migration | FAIL — 2 tasks |
+| "Implement service with exception handling" | implement + service (exception is part of it) | PASS |
+
+**Red flag words:** "and", "+", commas separating nouns. These usually indicate multiple concerns jammed into one task.
+
+### Rule 5: Count the Files
+
+**If a task implies creating or modifying >2 files, it's too broad.**
+
+Count the files mentioned or implied in the description. Source + test = 1 logical file.
+
+### Rule 6: Acceptance Criteria Count
+
+**If acceptance criteria lists >3 distinct checkpoints, the task combines multiple concerns.**
+
+| Acceptance | Criteria | Result |
+|-----------|----------|--------|
+| "Model exists. Migration runs." | 2 | PASS |
+| "Manager acquires. Handle releases. Stale healed. Migration publishable." | 4 | FAIL — split |
+
+### Rule 7: Noun Count in Title
+
+**Count the distinct nouns (objects being created/modified) in the title. More than 2 = split.**
+
+| Title | Nouns | Result |
+|-------|-------|--------|
+| "Create MachineLockManager service" | 1 (MachineLockManager) | PASS |
+| "Lock infrastructure: config, migration, model, service, exception" | 5 | FAIL — 5 tasks |
+
+### Recursive Decomposition Algorithm
+
+After initial task identification, the agent MUST run this loop:
+
+```
+FOR each task:
+  1. Single Commit Test → "Can I write ONE commit message for this?"
+  2. Verb-Object Test → "Does the title have ONE verb + ONE object?"
+  3. Noun Count → "How many distinct things am I creating?"
+  4. File Count → "How many files will this create/modify?"
+  5. Time Check → "Is this ≤ 45 minutes?"
+  6. Acceptance Count → "Are there ≤ 3 acceptance criteria?"
+
+  IF any check fails:
+    → Split the task along the failing dimension
+    → Re-run ALL checks on each sub-task
+
+  REPEAT until every task passes every check.
+```
+
+### Decomposition Example
+
+**BEFORE** (1 broad task, 120 min):
+
+```json
+{
+  "id": "lock",
+  "title": "Lock infrastructure: config, migration, model, service, exception",
+  "estimate_minutes": 120,
+  "acceptance": "MachineLockManager acquires/blocks/times out. MachineLockHandle releases/extends. Stale locks self-healed. Migration publishable."
+}
+```
+
+Failures: Single Commit ❌, Verb-Object ❌, Noun Count ❌ (5), File Count ❌ (5+), Time ❌ (120m), Acceptance ❌ (4+)
+
+**AFTER** (5 atomic tasks):
+
+```json
+[
+  {"id": "config",       "title": "Add parallel_dispatch config section",              "estimate_minutes": 15},
+  {"id": "migration",    "title": "Create machine_locks migration",                    "estimate_minutes": 15},
+  {"id": "model",        "title": "Create MachineStateLock Eloquent model",            "estimate_minutes": 15},
+  {"id": "lock-manager", "title": "Create MachineLockManager service",                 "estimate_minutes": 30},
+  {"id": "lock-handle",  "title": "Create MachineLockHandle and timeout exception",    "estimate_minutes": 20}
+]
+```
+
+Each task: one commit, one verb, one file (or tightly coupled pair), ≤ 30 min.
+
+### Expected Task Counts
+
+Use this as calibration — if your count is significantly below, you're under-decomposing:
+
+| Plan Size | Expected Tasks |
+|-----------|---------------|
+| 100 lines | 8–15 tasks |
+| 500 lines | 25–40 tasks |
+| 1000 lines | 45–70 tasks |
+| 2000 lines | 80–120 tasks |
 
 ## Quality Gates
 
@@ -300,7 +433,9 @@ Create a table mapping EVERY heading to a task or `context_only`:
 Write the JSON plan following the schema at `schemas/task-plan.schema.json`.
 
 ```bash
-PLAN_FILE=$(mktemp /tmp/task-plan-XXXXXX.json)
+_tmp=$(mktemp /tmp/task-plan-XXXXXXXX)
+PLAN_FILE="${_tmp}.json"
+mv "$_tmp" "$PLAN_FILE"
 cat > "$PLAN_FILE" << 'PLAN_EOF'
 {
   "version": 1,
