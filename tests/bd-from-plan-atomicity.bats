@@ -8,9 +8,9 @@ setup() {
     init_repo
 }
 
-# --- Rule 3: Max 45 Minutes ---
+# --- Rule 3: Max 15 Minutes ---
 
-@test "warns when task estimate exceeds 45 minutes" {
+@test "warns when task estimate exceeds 15 minutes" {
     cat > "${REPO}/big-task.json" << 'EOF'
 {
   "prefix": "big",
@@ -31,11 +31,11 @@ EOF
     run "$BD_FROM_PLAN" --dry-run "${REPO}/big-task.json"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY"
-    assert_output_contains "exceeds 45m"
+    assert_output_contains "exceeds 15m"
     assert_output_contains "split this task"
 }
 
-@test "no warning for task at exactly 45 minutes" {
+@test "no warning for task at exactly 15 minutes" {
     cat > "${REPO}/ok-task.json" << 'EOF'
 {
   "prefix": "ok",
@@ -47,7 +47,7 @@ EOF
       "id": "fine",
       "title": "Fine task",
       "source_sections": ["### 1.1"],
-      "estimate_minutes": 45
+      "estimate_minutes": 15
     }]
   }],
   "coverage": {"total_sections": 3, "mapped_sections": 2, "unmapped": [], "context_only": ["# T"]}
@@ -261,7 +261,7 @@ EOF
     run "$BD_FROM_PLAN" --dry-run "$plan_file"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY WARNINGS"
-    assert_output_contains "exceeds 45m"
+    assert_output_contains "exceeds 15m"
     assert_output_contains "3 sections"
     assert_output_contains "scope may be too broad"
     assert_output_contains "conjunctions"
@@ -321,5 +321,5 @@ EOF
     run "$BD_FROM_PLAN" --dry-run "${REPO}/banner-check.json"
     [ "$status" -eq 0 ]
     assert_output_contains "ONE concern"
-    assert_output_contains "45 minutes"
+    assert_output_contains "15 minutes"
 }
