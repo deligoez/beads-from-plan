@@ -35,6 +35,11 @@ Depends on payment gateway integration.
   "version": 1,
   "source": "docs/plans/order-processing.md",
   "prefix": "order",
+  "workflow": {
+    "quality_gate": "composer lint && composer test && composer type",
+    "commit_strategy": "agentic-commits",
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+  },
   "epics": [
     {
       "id": "model",
@@ -54,7 +59,6 @@ Depends on payment gateway integration.
           "source_sections": ["### 1.1 Create Order Model"],
           "source_lines": "7-10",
           "acceptance": "Order model with migration, factory, indexes on status and customer_id",
-          "quality_gate": {"lint": true, "test": true, "type_check": true},
           "commit_strategy": "agentic-commits"
         },
         {
@@ -68,7 +72,6 @@ Depends on payment gateway integration.
           "source_sections": ["### 1.2 Order Status Machine"],
           "source_lines": "12-15",
           "acceptance": "State machine transitions work. Invalid transitions throw. Tests cover all paths.",
-          "quality_gate": {"lint": true, "test": true, "type_check": true},
           "commit_strategy": "agentic-commits"
         }
       ]
@@ -91,7 +94,6 @@ Depends on payment gateway integration.
           "source_sections": ["### 2.1 Payment Gateway"],
           "source_lines": "17-19",
           "acceptance": "Stripe charges work in test mode. Error handling for failed payments.",
-          "quality_gate": {"lint": true, "test": true, "type_check": true},
           "commit_strategy": "agentic-commits"
         },
         {
@@ -105,7 +107,7 @@ Depends on payment gateway integration.
           "source_sections": ["### 2.2 Payment Webhooks"],
           "source_lines": "21-23",
           "acceptance": "Webhook endpoint validates signatures. Payment confirmed updates order status.",
-          "quality_gate": {"lint": true, "test": true},
+          "quality_gate": "composer lint && composer test",
           "commit_strategy": "agentic-commits"
         }
       ]
@@ -203,22 +205,22 @@ Tasks (4, topological order):
   [1] order-model-create: Create Order model and migration
       Type: feature | Priority: P1 | Est: 45m
       Deps: (none)
-      Gate: lint, test, type_check
+      Gate: composer lint && composer test && composer type
 
   [2] order-model-state-machine: Implement order status state machine
       Type: feature | Priority: P1 | Est: 90m
       Deps: order-model-create
-      Gate: lint, test, type_check
+      Gate: composer lint && composer test && composer type
 
   [3] order-payment-gateway: Integrate Stripe payment gateway
       Type: feature | Priority: P2 | Est: 120m
       Deps: order-model-create
-      Gate: lint, test, type_check
+      Gate: composer lint && composer test && composer type
 
   [4] order-payment-webhooks: Handle Stripe payment webhooks
       Type: feature | Priority: P2 | Est: 60m
       Deps: order-payment-gateway
-      Gate: lint, test
+      Gate: composer lint && composer test
 
 Coverage: 8 total, 6 mapped, 2 context_only, 0 unmapped -> PASS
 
