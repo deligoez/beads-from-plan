@@ -77,10 +77,10 @@ Look for these patterns when extracting dependencies:
 
 | Indicator | Estimate |
 |-----------|----------|
-| Single model + migration | 30-45 min |
-| CRUD endpoint | 45-60 min |
-| Complex business logic | 60-90 min |
-| Integration with external service | 90-120 min |
-| Full feature with tests | 60-120 min |
-| Configuration/setup | 15-30 min |
-| Documentation | 15-45 min |
+| Single model + migration | 10 min |
+| CRUD endpoint | 15 min |
+| Complex business logic | Split into 2-3 tasks of 10-15 min |
+| Integration with external service | Split into 3-4 tasks of 10-15 min |
+| Full feature with tests | Split into multiple tasks of 5-15 min |
+| Configuration/setup | 5-10 min |
+| Documentation | 5-10 min |
