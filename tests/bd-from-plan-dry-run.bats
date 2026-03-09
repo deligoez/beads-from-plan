@@ -8,6 +8,10 @@ setup() {
     init_repo
 }
 
+teardown() {
+    teardown_repo
+}
+
 # --- Dry Run Mode ---
 
 @test "dry-run shows epic creation without creating" {
