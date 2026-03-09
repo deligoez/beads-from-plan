@@ -18,6 +18,15 @@ setup() {
     assert_output_contains "circular dependency"
 }
 
+@test "detects 3-node circular dependency (A->B->C->A)" {
+    local plan_file
+    plan_file=$(create_3node_circular_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    [ "$status" -ne 0 ]
+    assert_output_contains "circular dependency"
+    assert_output_contains "CYCLE:"
+}
+
 @test "passes with no circular dependencies" {
     local plan_file
     plan_file=$(create_dependency_plan)
