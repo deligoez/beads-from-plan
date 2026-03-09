@@ -8,6 +8,10 @@ setup() {
     init_repo
 }
 
+teardown() {
+    teardown_repo
+}
+
 # --- Cycle Detection ---
 
 @test "detects simple circular dependency (A->B->A)" {
