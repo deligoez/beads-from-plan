@@ -8,6 +8,10 @@ setup() {
     init_repo
 }
 
+teardown() {
+    teardown_repo
+}
+
 # --- Valid Plans ---
 
 @test "validates minimal valid plan" {
