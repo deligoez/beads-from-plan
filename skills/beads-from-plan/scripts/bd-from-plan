@@ -256,27 +256,37 @@ check_cycles() {
             }
         ] |
 
-        # DFS cycle detection
-        . as $nodes |
-        reduce .[] as $node (
-            {has_cycle: false, cycle_path: []};
-            if .has_cycle then .
+        # DFS cycle detection (handles cycles of any length)
+        # Build adjacency lookup: {id: [deps]}
+        (reduce .[] as $n ({}; . + {($n.id): $n.deps})) as $adj |
+        [.[].id] as $all_ids |
+
+        # Recursive DFS: visit node, track current path
+        # Returns {found: bool, cycle: [path]} or null
+        def dfs($node; $path):
+            if ($path | any(. == $node)) then
+                # Found cycle: extract the cycle portion from path
+                ($path | to_entries | map(select(.value == $node)) | .[0].key) as $idx |
+                {found: true, cycle: ($path[$idx:] + [$node])}
             else
-                reduce ($node.deps[]) as $dep (.;
-                    if .has_cycle then .
-                    else
-                        . as $state |
-                        if ($nodes | map(select(.id == $dep)) | length) == 0 then
-                            $state
-                        elif ($nodes | map(select(.id == $dep)) | .[0].deps | map(select(. == $node.id)) | length) > 0 then
-                            $state | .has_cycle = true | .cycle_path = [$node.id, $dep, $node.id]
-                        else $state end
+                ($adj[$node] // []) as $deps |
+                reduce $deps[] as $dep (
+                    null;
+                    if . != null then .
+                    else dfs($dep; $path + [$node])
                     end
                 )
+            end;
+
+        # Try DFS from each node, stop at first cycle found
+        reduce $all_ids[] as $start (
+            null;
+            if . != null then .
+            else dfs($start; [])
             end
         ) |
-        if .has_cycle then
-            "CYCLE: " + (.cycle_path | join(" -> "))
+        if . != null and .found then
+            "CYCLE: " + (.cycle | join(" -> "))
         else empty end
     ' 2>/dev/null) || true
 
