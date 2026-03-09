@@ -8,6 +8,10 @@ setup() {
     init_repo
 }
 
+teardown() {
+    teardown_repo
+}
+
 # --- Real Execution ---
 
 @test "creates epic from minimal plan" {
