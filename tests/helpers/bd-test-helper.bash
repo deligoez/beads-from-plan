@@ -19,6 +19,12 @@ setup_git_env() {
 
     git config --global init.defaultBranch master
     git config --global advice.detachedHead false
+
+    # Wrap bd to always use --no-daemon in tests (prevents zombie daemon processes)
+    bd() {
+        command bd --no-daemon "$@"
+    }
+    export -f bd
 }
 
 # --- Repo Setup ---
@@ -37,11 +43,19 @@ init_repo() {
     git add README.md
     git commit --quiet -m "initial commit"
 
-    # Initialize beads
-    bd init --quiet 2>/dev/null || bd init 2>/dev/null || true
+    # Initialize beads (--no-daemon prevents zombie daemon processes in tests)
+    bd init --no-daemon --quiet 2>/dev/null || bd init --no-daemon 2>/dev/null || true
 
     # Capture the beads prefix for assertions
     BD_PREFIX=$(bd config list 2>/dev/null | grep 'issue_prefix' | awk '{print $3}')
+}
+
+# Stop the bd daemon spawned by init_repo
+# Must be called in each test file's teardown() to prevent zombie daemons
+teardown_repo() {
+    if [ -n "${REPO:-}" ] && [ -d "${REPO}/.beads" ]; then
+        bd daemons stop "$REPO" 2>/dev/null || true
+    fi
 }
 
 # --- Plan Fixtures ---
