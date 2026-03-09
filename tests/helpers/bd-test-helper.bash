@@ -285,6 +285,52 @@ EOF
     echo "$plan_file"
 }
 
+# Create a plan with 3-node circular dependency A->B->C->A (should fail)
+create_3node_circular_plan() {
+    local plan_file="${1:-${REPO}/plan.json}"
+    cat > "$plan_file" << 'EOF'
+{
+  "version": 1,
+  "source": "docs/plan.md",
+  "prefix": "cyc3",
+  "epics": [
+    {
+      "id": "core",
+      "title": "Core",
+      "source_sections": ["## 1. Core"],
+      "tasks": [
+        {
+          "id": "a",
+          "title": "Task A",
+          "source_sections": ["### 1.1 A"],
+          "depends_on": ["c"]
+        },
+        {
+          "id": "b",
+          "title": "Task B",
+          "source_sections": ["### 1.2 B"],
+          "depends_on": ["a"]
+        },
+        {
+          "id": "c",
+          "title": "Task C",
+          "source_sections": ["### 1.3 C"],
+          "depends_on": ["b"]
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "total_sections": 5,
+    "mapped_sections": 4,
+    "unmapped": [],
+    "context_only": ["# Title"]
+  }
+}
+EOF
+    echo "$plan_file"
+}
+
 # Create a plan with duplicate IDs (should fail)
 create_duplicate_id_plan() {
     local plan_file="${1:-${REPO}/plan.json}"
