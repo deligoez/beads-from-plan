@@ -8,6 +8,10 @@ setup() {
     init_repo
 }
 
+teardown() {
+    teardown_repo
+}
+
 # --- Rule 3: Max 15 Minutes ---
 
 @test "warns when task estimate exceeds 15 minutes" {
