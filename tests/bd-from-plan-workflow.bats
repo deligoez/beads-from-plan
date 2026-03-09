@@ -8,6 +8,10 @@ setup() {
     init_repo
 }
 
+teardown() {
+    teardown_repo
+}
+
 # --- Workflow Inheritance ---
 
 @test "task inherits quality gate from workflow when not overridden" {
