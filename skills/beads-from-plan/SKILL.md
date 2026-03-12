@@ -297,13 +297,15 @@ The agent MUST verify the quality gate command runs successfully before includin
 
 ## Commit Strategy
 
-Reference `agentic-commits` for atomic commit discipline. Each task completion should result in well-structured commits. Set `commit_strategy` per task:
+Each task's `commit_strategy` determines HOW the agent commits after the quality gate passes.
 
-| Strategy | When |
-|----------|------|
-| `agentic-commits` | Default for all code tasks |
-| `conventional` | Simple config changes, docs |
-| `manual` | Complex merges, manual intervention needed |
+| Strategy | Agent Action |
+|----------|-------------|
+| `agentic-commits` | Invoke the `/agentic-commits` skill — it splits changes into atomic one-file-per-commit hunks with structured messages |
+| `conventional` | `git add` changed files + `git commit` with `type(scope): message` format |
+| `manual` | Do NOT commit — leave changes staged for user to handle |
+
+**Default:** `agentic-commits` for all code tasks. The workflow-level default applies unless a task overrides it.
 
 ---
 
