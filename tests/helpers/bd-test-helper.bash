@@ -173,7 +173,7 @@ create_full_plan() {
   "workflow": {
     "quality_gate": "composer lint && composer test && composer type",
     "commit_strategy": "agentic-commits",
-    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit using agentic-commits"
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit IMMEDIATELY after gate passes (do NOT batch with other tasks)\n- [ ] Commit using agentic-commits"
   },
   "epics": [
     {
