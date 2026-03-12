@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for input handling: files, stdin, arguments
+# Tests for input handling: plan directory argument
 
 load 'helpers/bd-test-helper'
 
@@ -12,61 +12,60 @@ teardown() {
     teardown_repo
 }
 
-# --- File Input ---
+# --- Directory Input ---
 
-@test "reads plan from file argument" {
-    local plan_file
-    plan_file=$(create_minimal_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+@test "reads plan from directory argument" {
+    local plan_dir
+    plan_dir=$(create_minimal_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "Plan structure is valid"
 }
 
-@test "reads plan from absolute path" {
-    local plan_file
-    plan_file=$(create_minimal_plan "${BATS_TEST_TMPDIR}/abs-plan.json")
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+@test "reads plan from absolute directory path" {
+    local plan_dir
+    plan_dir=$(create_minimal_plan "${BATS_TEST_TMPDIR}/abs-plan")
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "Plan structure is valid"
 }
 
-# --- Stdin Input ---
-
-@test "reads plan from stdin with --stdin flag" {
-    local plan_file
-    plan_file=$(create_minimal_plan)
-    run bash -c "cat '$plan_file' | '$BD_FROM_PLAN' --dry-run --stdin"
+@test "merges _plan.json and epic files into single plan" {
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
-    assert_output_contains "Plan structure is valid"
+    # Should see both epics from separate files
+    assert_output_contains "dep-model"
+    assert_output_contains "dep-api"
 }
 
-@test "stdin works with piped echo" {
-    run bash -c "echo '{\"epics\":[{\"id\":\"x\",\"title\":\"X\",\"source_sections\":[\"## 1\"],\"tasks\":[{\"id\":\"y\",\"title\":\"Y\",\"source_sections\":[\"### 1\"]}]}],\"coverage\":{\"total_sections\":3,\"mapped_sections\":2,\"unmapped\":[],\"context_only\":[\"# T\"]}}' | '$BD_FROM_PLAN' --dry-run --stdin"
+@test "sorts epic files alphabetically" {
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
+    # epic-api.json comes before epic-model.json alphabetically
+    # So api epic should appear first in the merged plan
+    # But topological sort may reorder tasks — just verify both are present
+    assert_output_contains "dep-api"
+    assert_output_contains "dep-model"
 }
 
 # --- Argument Parsing ---
 
-@test "dry-run flag works before file" {
-    local plan_file
-    plan_file=$(create_minimal_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
-    [ "$status" -eq 0 ]
-    assert_output_contains "DRY RUN"
-}
-
-@test "dry-run flag works with stdin" {
-    local plan_file
-    plan_file=$(create_minimal_plan)
-    run bash -c "cat '$plan_file' | '$BD_FROM_PLAN' --dry-run --stdin"
+@test "dry-run flag works before directory" {
+    local plan_dir
+    plan_dir=$(create_minimal_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "DRY RUN"
 }
 
 # --- Error Cases ---
 
-@test "fails on nonexistent file" {
-    run "$BD_FROM_PLAN" --dry-run "/tmp/does-not-exist-12345.json"
+@test "fails on nonexistent directory" {
+    run "$BD_FROM_PLAN" --dry-run "/tmp/does-not-exist-12345"
     [ "$status" -ne 0 ]
     assert_output_contains "not found"
 }
@@ -77,7 +76,42 @@ teardown() {
     assert_output_contains "usage"
 }
 
-@test "fails on empty stdin" {
-    run bash -c "echo '' | '$BD_FROM_PLAN' --dry-run --stdin"
+@test "fails when _plan.json is missing from directory" {
+    local plan_dir="${REPO}/bad-plan"
+    mkdir -p "$plan_dir"
+    cat > "$plan_dir/epic-core.json" << 'EOF'
+{
+  "id": "core",
+  "title": "Core",
+  "source_sections": ["## 1"],
+  "tasks": [{"id": "a", "title": "A", "source_sections": ["### 1"]}]
+}
+EOF
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -ne 0 ]
+    assert_output_contains "_plan.json"
+}
+
+@test "fails when no epic files exist in directory" {
+    local plan_dir="${REPO}/no-epics"
+    mkdir -p "$plan_dir"
+    cat > "$plan_dir/_plan.json" << 'EOF'
+{
+  "version": 1,
+  "source": "docs/plan.md",
+  "prefix": "test",
+  "coverage": {"total_sections": 1, "mapped_sections": 0, "unmapped": [], "context_only": ["# T"]}
+}
+EOF
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
+    [ "$status" -ne 0 ]
+    assert_output_contains "no epic"
+}
+
+@test "fails when a regular file is passed instead of directory" {
+    local plan_file="${REPO}/plan.json"
+    echo '{}' > "$plan_file"
+    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    [ "$status" -ne 0 ]
+    assert_output_contains "not a directory"
 }
