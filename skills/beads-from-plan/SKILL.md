@@ -31,12 +31,10 @@ Use the base directory provided at skill activation to construct the full path:
 
 ```bash
 # The base directory is shown as "Base directory for this skill: <path>" when the skill loads.
-# Always use mktemp to avoid path collisions between concurrent runs.
-# macOS mktemp doesn't support suffixes, so create then rename.
-_tmp=$(mktemp /tmp/task-plan-XXXXXXXX)
-PLAN_FILE="${_tmp}.json"
-mv "$_tmp" "$PLAN_FILE"
-<base_directory>/scripts/bd-from-plan "$PLAN_FILE"
+# Create a plan directory with mktemp
+PLAN_DIR=$(mktemp -d /tmp/task-plan-XXXXXXXX)
+# Write _plan.json and epic-*.json files into PLAN_DIR (see steps below)
+<base_directory>/scripts/bd-from-plan "$PLAN_DIR"
 ```
 
 ---
@@ -49,7 +47,7 @@ mv "$_tmp" "$PLAN_FILE"
 Markdown Plan (2000+ lines)
         |
         v
-   AI Analysis
+   AI Analysis (per-epic, parallelizable)
    - Parse all headings (##, ###, ####)
    - Identify epics (top-level sections)
    - Identify tasks (sub-sections)
@@ -57,20 +55,21 @@ Markdown Plan (2000+ lines)
    - Verify 100% section coverage
         |
         v
-  JSON Task Plan (mktemp + rename to .json)
-   - Structured epics and tasks
-   - Dependency graph
-   - Quality gates per task
-   - Coverage report
+  Plan Directory (mktemp -d)
+   plan-dir/
+     _plan.json           Global: prefix, workflow, coverage
+     epic-auth.json       Epic + tasks (full details)
+     epic-payment.json    Epic + tasks (full details)
         |
         v
   bd-from-plan script
-   - Validates JSON schema
+   - Merges _plan.json + epic-*.json files
+   - Validates structure and coverage
    - Rejects if unmapped sections exist
+   - Detects circular dependencies
    - Topological sort by dependencies
-   - Creates epics via bd create --type epic
-   - Creates tasks via bd create --type task --parent
-   - Adds dependencies via bd dep add
+   - Creates epics and tasks in order
+   - Wires dependencies via bd dep add
    - Reports summary
 ```
 
@@ -454,15 +453,18 @@ Create a table mapping EVERY heading to a task or `context_only`:
 
 **If ANY section is unmapped and not context_only -> STOP and fix.**
 
-## Step 5: Generate JSON Plan
+## Step 5: Generate Plan Directory
 
-Write the JSON plan following the schema at `schemas/task-plan.schema.json`.
+Write the plan as a directory with separate files. This keeps each file small and recoverable.
 
 ```bash
-_tmp=$(mktemp /tmp/task-plan-XXXXXXXX)
-PLAN_FILE="${_tmp}.json"
-mv "$_tmp" "$PLAN_FILE"
-cat > "$PLAN_FILE" << 'PLAN_EOF'
+PLAN_DIR=$(mktemp -d /tmp/task-plan-XXXXXXXX)
+```
+
+### Step 5a: Write `_plan.json` (global metadata)
+
+```bash
+cat > "$PLAN_DIR/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plans/feature-x.md",
@@ -470,47 +472,8 @@ cat > "$PLAN_FILE" << 'PLAN_EOF'
   "workflow": {
     "quality_gate": "composer lint && composer test && composer type",
     "commit_strategy": "agentic-commits",
-    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit IMMEDIATELY after gate passes (do NOT batch with other tasks)\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit IMMEDIATELY after gate passes (do NOT batch with other tasks)\n- [ ] Commit using agentic-commits"
   },
-  "epics": [
-    {
-      "id": "auth",
-      "title": "Authentication System",
-      "description": "Implement user authentication with JWT tokens and password reset",
-      "priority": 1,
-      "labels": ["auth", "security"],
-      "source_sections": ["## 1. Authentication"],
-      "tasks": [
-        {
-          "id": "user-model",
-          "title": "Create User model and migration",
-          "description": "Define User model with email, password_hash, timestamps. Create migration with proper indexes.",
-          "type": "feature",
-          "priority": 1,
-          "estimate_minutes": 10,
-          "labels": ["model"],
-          "depends_on": [],
-          "source_sections": ["### 1.1 User Model"],
-          "source_lines": "15-42",
-          "acceptance": "User model exists with migration. Factory and seeder work. PHPStan passes.",
-          "commit_strategy": "agentic-commits"
-        },
-        {
-          "id": "login-flow",
-          "title": "Implement login endpoint with JWT",
-          "description": "POST /api/login accepts email+password, returns JWT. Validates credentials against User model.",
-          "type": "feature",
-          "priority": 1,
-          "estimate_minutes": 15,
-          "depends_on": ["user-model"],
-          "source_sections": ["### 1.2 Login Flow", "#### 1.2.1 JWT Tokens"],
-          "source_lines": "43-98",
-          "acceptance": "Login endpoint returns valid JWT. Invalid credentials return 401. Tests pass.",
-          "commit_strategy": "agentic-commits"
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 12,
     "mapped_sections": 10,
@@ -518,13 +481,61 @@ cat > "$PLAN_FILE" << 'PLAN_EOF'
     "context_only": ["# Feature X Plan", "## Overview"]
   }
 }
-PLAN_EOF
+EOF
 ```
+
+### Step 5b: Write one `epic-{id}.json` per epic
+
+Write each epic as a separate file. **Each file is small** (~1-3K tokens), minimizing AI output errors.
+
+```bash
+cat > "$PLAN_DIR/epic-auth.json" << 'EOF'
+{
+  "id": "auth",
+  "title": "Authentication System",
+  "description": "Implement user authentication with JWT tokens and password reset",
+  "priority": 1,
+  "labels": ["auth", "security"],
+  "source_sections": ["## 1. Authentication"],
+  "tasks": [
+    {
+      "id": "user-model",
+      "title": "Create User model and migration",
+      "description": "Define User model with email, password_hash, timestamps. Create migration with proper indexes.",
+      "type": "feature",
+      "priority": 1,
+      "estimate_minutes": 10,
+      "labels": ["model"],
+      "depends_on": [],
+      "source_sections": ["### 1.1 User Model"],
+      "source_lines": "15-42",
+      "acceptance": "User model exists with migration. Factory and seeder work. PHPStan passes.",
+      "commit_strategy": "agentic-commits"
+    },
+    {
+      "id": "login-flow",
+      "title": "Implement login endpoint with JWT",
+      "description": "POST /api/login accepts email+password, returns JWT.",
+      "type": "feature",
+      "priority": 1,
+      "estimate_minutes": 15,
+      "depends_on": ["user-model"],
+      "source_sections": ["### 1.2 Login Flow", "#### 1.2.1 JWT Tokens"],
+      "source_lines": "43-98",
+      "acceptance": "Login endpoint returns valid JWT. Invalid credentials return 401.",
+      "commit_strategy": "agentic-commits"
+    }
+  ]
+}
+EOF
+```
+
+**File naming convention:** `epic-{id}.json` where `{id}` matches the epic's `id` field. Files are read in alphabetical order.
 
 ## Step 6: Execute Plan
 
 ```bash
-<base_directory>/scripts/bd-from-plan "$PLAN_FILE"
+<base_directory>/scripts/bd-from-plan "$PLAN_DIR"
 ```
 
 The script will:
@@ -550,15 +561,17 @@ bd epic status             # Check epic completion status
 
 Validate an existing plan JSON against its source markdown.
 
-## Step 1: Load Both Files
+## Step 1: Load Plan Directory
 
 ```bash
-# Read the plan JSON
-cat "$PLAN_FILE" | jq .
+# Read the global metadata
+cat "$PLAN_DIR/_plan.json" | jq .
 
 # Read the source markdown
-# Extract the source path from the plan
-SOURCE=$(cat "$PLAN_FILE" | jq -r '.source')
+SOURCE=$(cat "$PLAN_DIR/_plan.json" | jq -r '.source')
+
+# List all epic files
+ls "$PLAN_DIR"/epic-*.json
 ```
 
 ## Step 2: Extract Markdown Headings
@@ -616,7 +629,7 @@ Keep IDs short but descriptive. Avoid abbreviations that aren't obvious.
 Always do a dry run first for large plans:
 
 ```bash
-<base_directory>/scripts/bd-from-plan --dry-run "$PLAN_FILE"
+<base_directory>/scripts/bd-from-plan --dry-run "$PLAN_DIR"
 ```
 
 This validates everything and shows what WOULD be created without actually creating anything.
@@ -761,9 +774,8 @@ Before ending a session:
 
 | Command | Purpose |
 |---------|---------|
-| `bd-from-plan plan.json` | Create tasks from plan |
-| `bd-from-plan --dry-run plan.json` | Preview without creating |
-| `bd-from-plan --stdin < plan.json` | Read plan from stdin |
+| `bd-from-plan plan-dir/` | Create tasks from plan directory |
+| `bd-from-plan --dry-run plan-dir/` | Preview without creating |
 | `bd ready --pretty` | Show next available tasks |
 | `bd show <id>` | Task details |
 | `bd update <id> --claim` | Claim a task before working |
