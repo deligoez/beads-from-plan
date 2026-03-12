@@ -15,26 +15,26 @@ teardown() {
 # --- Cycle Detection ---
 
 @test "detects simple circular dependency (A->B->A)" {
-    local plan_file
-    plan_file=$(create_circular_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_circular_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -ne 0 ]
     assert_output_contains "circular dependency"
 }
 
 @test "detects 3-node circular dependency (A->B->C->A)" {
-    local plan_file
-    plan_file=$(create_3node_circular_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_3node_circular_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -ne 0 ]
     assert_output_contains "circular dependency"
     assert_output_contains "CYCLE:"
 }
 
 @test "passes with no circular dependencies" {
-    local plan_file
-    plan_file=$(create_dependency_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "No circular dependencies"
 }
@@ -42,9 +42,9 @@ teardown() {
 # --- Topological Order ---
 
 @test "tasks appear in dependency order (dry-run)" {
-    local plan_file
-    plan_file=$(create_dependency_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
 
     # user should appear before token (token depends on user)
@@ -55,9 +55,9 @@ teardown() {
 }
 
 @test "cross-epic dependencies appear in order (dry-run)" {
-    local plan_file
-    plan_file=$(create_dependency_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
 
     # model-user should appear before api-login (login depends on model-user)
@@ -72,9 +72,9 @@ teardown() {
 @test "resolves same-epic dependency without prefix" {
     # In dependency_plan, token depends on "user" (no epic prefix)
     # Should resolve to model-user within same epic
-    local plan_file
-    plan_file=$(create_dependency_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "dep-model-token"
     assert_output_contains "dep-model-user"
@@ -84,9 +84,9 @@ teardown() {
 
 @test "resolves cross-epic dependency with epic prefix" {
     # In dependency_plan, login depends on "model-user" and "model-token"
-    local plan_file
-    plan_file=$(create_dependency_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "dep-api-login"
     assert_output_contains "deps: model-user, model-token"
@@ -95,9 +95,9 @@ teardown() {
 # --- No Dependencies ---
 
 @test "handles tasks with no dependencies" {
-    local plan_file
-    plan_file=$(create_minimal_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_minimal_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "no dependencies to wire"
 }
@@ -105,9 +105,9 @@ teardown() {
 # --- Dependency Wiring in Dry Run ---
 
 @test "shows dependency wiring commands in dry-run" {
-    local plan_file
-    plan_file=$(create_dependency_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_dependency_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "bd dep add"
 }
@@ -115,9 +115,9 @@ teardown() {
 # --- Duplicate IDs ---
 
 @test "rejects duplicate task IDs" {
-    local plan_file
-    plan_file=$(create_duplicate_id_plan)
-    run "$BD_FROM_PLAN" --dry-run "$plan_file"
+    local plan_dir
+    plan_dir=$(create_duplicate_id_plan)
+    run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -ne 0 ]
     assert_output_contains "duplicate task IDs"
 }
