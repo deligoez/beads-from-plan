@@ -11,25 +11,26 @@ Large implementation plans (2000+ lines) get lost between sessions. Tasks are fo
 ```
 Markdown Plan (2000+ lines)
         |
-   AI Analysis (Claude Code skill)
+   AI Analysis (Claude Code skill, per-epic)
         |
-   JSON Task Plan (schema-validated)
+   Plan Directory (_plan.json + epic-*.json)
         |
-   bd-from-plan script
+   bd-from-plan script (merge + validate + create)
         |
    Beads epics + tasks + dependencies
 ```
 
-The AI reads your plan, maps every section to a task, and produces a JSON plan. The script validates coverage (rejects if any section is unmapped), detects circular dependencies, and creates beads in topological order.
+The AI reads your plan, maps every section to a task, and produces a plan directory with one file per epic. The script merges the files, validates coverage (rejects if any section is unmapped), detects circular dependencies, and creates beads in topological order.
 
 ## Key Features
 
 - **100% Coverage Guarantee** — Every plan section must map to a task or be explicitly marked as context-only
 - **Dependency Tracking** — Cross-epic and intra-epic dependencies with cycle detection
-- **Atomicity Enforcement** — Warns when tasks exceed 120 minutes, span too many sections, or have overly broad scope
+- **Atomicity Enforcement** — Warns when tasks exceed 15 minutes, span too many sections, or have overly broad scope
 - **Quality Gates** — Per-task lint/test/type-check requirements
 - **Dry Run** — Preview everything before creating
 - **Idempotent** — Re-running skips existing issues
+- **Directory-Based Input** — Each epic is a separate JSON file, keeping AI output small and reliable
 
 ## Installation
 
@@ -55,53 +56,72 @@ Claude will:
 2. Map sections to epics and tasks
 3. Identify dependencies
 4. Verify 100% coverage
-5. Generate and execute the JSON plan
+5. Generate the plan directory and execute
 
 ### Manual Script Usage
 
 ```bash
+# Create plan directory
+mkdir plan-dir/
+
+# Write _plan.json (global metadata) and epic-*.json (one per epic)
+# See examples below
+
 # Dry run (preview)
-bd-from-plan --dry-run plan.json
+bd-from-plan --dry-run plan-dir/
 
 # Create tasks
-bd-from-plan plan.json
-
-# From stdin
-cat plan.json | bd-from-plan --stdin
+bd-from-plan plan-dir/
 ```
 
-## JSON Plan Schema
+## Plan Directory Format
 
-See [schemas/task-plan.schema.json](skills/beads-from-plan/schemas/task-plan.schema.json) for the full schema.
+The plan is a directory containing:
+
+```
+plan-dir/
+  _plan.json           # Global: version, source, prefix, workflow, coverage
+  epic-auth.json       # One epic with its tasks
+  epic-payment.json    # Another epic with its tasks
+```
+
+### `_plan.json` (global metadata)
 
 ```json
 {
   "version": 1,
   "source": "docs/plans/feature.md",
   "prefix": "feat",
-  "epics": [
-    {
-      "id": "auth",
-      "title": "Authentication",
-      "source_sections": ["## 1. Authentication"],
-      "tasks": [
-        {
-          "id": "user-model",
-          "title": "Create User model",
-          "depends_on": [],
-          "source_sections": ["### 1.1 User Model"],
-          "quality_gate": "composer lint && composer test",
-          "commit_strategy": "agentic-commits"
-        }
-      ]
-    }
-  ],
+  "workflow": {
+    "quality_gate": "composer lint && composer test",
+    "commit_strategy": "agentic-commits"
+  },
   "coverage": {
     "total_sections": 8,
     "mapped_sections": 6,
     "unmapped": [],
     "context_only": ["# Title", "## Overview"]
   }
+}
+```
+
+### `epic-{id}.json` (per-epic)
+
+```json
+{
+  "id": "auth",
+  "title": "Authentication",
+  "source_sections": ["## 1. Authentication"],
+  "tasks": [
+    {
+      "id": "user-model",
+      "title": "Create User model",
+      "depends_on": [],
+      "source_sections": ["### 1.1 User Model"],
+      "quality_gate": "composer lint && composer test",
+      "commit_strategy": "agentic-commits"
+    }
+  ]
 }
 ```
 
