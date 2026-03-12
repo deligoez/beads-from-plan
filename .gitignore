@@ -1,3 +1,9 @@
 *.tmp
 /tmp/
 .DS_Store
+.claude/cache/
+.claude/tsc-cache/
+.perles/
+.agents/
+skills-lock.json
+thoughts/
