@@ -373,7 +373,7 @@ Record the user's choices in the `workflow` field of the JSON plan:
   "workflow": {
     "quality_gate": "composer lint && composer test && composer larastan",
     "commit_strategy": "agentic-commits",
-    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer larastan\n- [ ] Commit using agentic-commits"
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer larastan\n- [ ] Commit IMMEDIATELY after gate passes (do NOT batch with other tasks)\n- [ ] Commit using agentic-commits"
   }
 }
 ```
@@ -468,7 +468,7 @@ cat > "$PLAN_FILE" << 'PLAN_EOF'
   "workflow": {
     "quality_gate": "composer lint && composer test && composer type",
     "commit_strategy": "agentic-commits",
-    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
+    "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit IMMEDIATELY after gate passes (do NOT batch with other tasks)\n- [ ] Commit using agentic-commits\n- [ ] Close this task when done: bd close <task-id>"
   },
   "epics": [
     {
@@ -657,10 +657,30 @@ After tasks are created, the agent works through them using this cycle:
 1. FIND    →  bd ready --pretty              # What can I work on?
 2. READ    →  bd show <id>                   # Understand the task
 3. CLAIM   →  bd update <id> --claim         # Atomic claim (fails if taken)
-4. WORK    →  (implement, test, commit)
-5. CLOSE   →  bd close <id> --reason="..."   # Mark complete
-6. NEXT    →  bd ready --pretty              # What's next?
+4. WORK    →  implement the task
+5. GATE    →  run quality gate command        # Must pass before commit
+6. COMMIT  →  commit using commit_strategy   # IMMEDIATELY after gate passes
+7. CLOSE   →  bd close <id> --reason="..."   # Mark complete
+8. NEXT    →  bd ready --pretty              # What's next?
 ```
+
+### Commit After Every Task (STRICT)
+
+**Each task MUST be committed IMMEDIATELY after its quality gate passes.** Do NOT batch commits.
+
+| Pattern | Result |
+|---------|--------|
+| Task 1 done → commit → Task 2 done → commit → Task 3 done → commit | CORRECT |
+| Task 1 done → Task 2 done → Task 3 done → commit all | WRONG |
+
+**Why?** Batching commits defeats the purpose of atomic tasks:
+- Impossible to revert a single task
+- `bd close` with no matching commit breaks traceability
+- Parallel agents can't see each other's progress
+- Context loss mid-session loses all uncommitted work
+
+The commit strategy (from `workflow.commit_strategy` or task-level override) determines the format.
+For `agentic-commits`: use the `/agentic-commits` skill to split changes into atomic, one-file-per-commit hunks.
 
 ### Finding Work
 
