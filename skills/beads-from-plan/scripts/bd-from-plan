@@ -2,15 +2,18 @@
 # bd-from-plan: Execute a task plan — create beads epics, tasks, and dependencies from JSON
 #
 # Separates semantic analysis (AI agent) from mechanical execution (this script).
-# The AI agent reads a markdown plan, produces a JSON task plan.
+# The AI agent reads a markdown plan, produces a JSON task plan directory.
 # This script executes the plan: creating epics, tasks, wiring dependencies.
 #
-# Usage: bd-from-plan <plan.json>
-#        bd-from-plan --dry-run <plan.json>
-#        bd-from-plan --stdin < plan.json
-#        echo '{"epics":[...]}' | bd-from-plan --stdin
+# Usage: bd-from-plan [--dry-run] <plan-dir>
 #
-# Plan format: see schemas/task-plan.schema.json
+# Plan directory format:
+#   plan-dir/
+#     _plan.json          Global metadata (version, source, prefix, workflow, coverage)
+#     epic-auth.json      One epic with all its tasks
+#     epic-payment.json   Another epic with all its tasks
+#
+# See schemas/task-plan.schema.json for field details.
 #
 # ID resolution:
 #   The script auto-detects the beads prefix from `bd config list`.
@@ -72,6 +75,72 @@ section() {
 check_dependencies() {
     command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
     command -v bd >/dev/null 2>&1 || die "bd (beads CLI) is required but not installed"
+}
+
+# --- Plan Directory Merging ---
+
+# Merge a plan directory into a single JSON string.
+# Reads _plan.json for metadata, then all epic-*.json files (sorted alphabetically)
+# and combines them into: { ...meta, epics: [epic1, epic2, ...] }
+# Args: $1 = plan directory path
+# Output: merged JSON on stdout
+merge_plan() {
+    local plan_dir="$1"
+
+    # Validate directory exists
+    if [ ! -d "$plan_dir" ]; then
+        die "plan directory not found: '$plan_dir'"
+    fi
+
+    # Check _plan.json exists
+    local meta_file="$plan_dir/_plan.json"
+    if [ ! -f "$meta_file" ]; then
+        die "missing _plan.json in plan directory: '$plan_dir'"
+    fi
+
+    # Validate _plan.json is valid JSON
+    if ! jq empty "$meta_file" 2>/dev/null; then
+        echo -e "${RED}ERROR:${NC} invalid JSON in _plan.json" >&2
+        return 1
+    fi
+
+    # Find epic files (sorted alphabetically)
+    local epic_files=()
+    while IFS= read -r f; do
+        epic_files+=("$f")
+    done < <(find "$plan_dir" -maxdepth 1 -name 'epic-*.json' -type f | sort)
+
+    if [ ${#epic_files[@]} -eq 0 ]; then
+        die "no epic files found in plan directory: '$plan_dir' (expected epic-*.json)"
+    fi
+
+    # Validate each epic file is valid JSON
+    for epic_file in "${epic_files[@]}"; do
+        if ! jq empty "$epic_file" 2>/dev/null; then
+            echo -e "${RED}ERROR:${NC} invalid JSON in $(basename "$epic_file")" >&2
+            return 1
+        fi
+    done
+
+    # Merge: read meta, add epics array from epic files
+    local meta_json
+    meta_json=$(cat "$meta_file")
+
+    # Build epics array by concatenating all epic file contents
+    local epics_json="["
+    local first=1
+    for epic_file in "${epic_files[@]}"; do
+        if [ "$first" -eq 1 ]; then
+            first=0
+        else
+            epics_json+=","
+        fi
+        epics_json+=$(cat "$epic_file")
+    done
+    epics_json+="]"
+
+    # Merge meta + epics using jq
+    echo "$meta_json" | jq --argjson epics "$epics_json" '. + {epics: $epics}'
 }
 
 # Detect the beads database prefix (e.g., "bd-myrepo")
@@ -726,8 +795,7 @@ print_summary() {
 main() {
     check_dependencies
 
-    local plan_json=""
-    local plan_files=()
+    local plan_dir=""
 
     # Parse arguments
     while [ $# -gt 0 ]; do
@@ -736,39 +804,39 @@ main() {
                 DRY_RUN=1
                 shift
                 ;;
-            --stdin)
-                plan_json=$(cat)
-                shift
-                ;;
             -h|--help)
-                echo "Usage: bd-from-plan [--dry-run] <plan.json>"
-                echo "       bd-from-plan [--dry-run] --stdin < plan.json"
+                echo "Usage: bd-from-plan [--dry-run] <plan-dir>"
+                echo ""
+                echo "Plan directory must contain:"
+                echo "  _plan.json          Global metadata (version, source, prefix, workflow, coverage)"
+                echo "  epic-<id>.json      One file per epic with all its tasks"
                 echo ""
                 echo "Options:"
                 echo "  --dry-run    Preview what would be created without creating anything"
-                echo "  --stdin      Read plan from stdin"
                 echo "  -h, --help   Show this help"
                 exit 0
                 ;;
             *)
-                if [ -f "$1" ]; then
-                    plan_files+=("$1")
+                if [ -d "$1" ]; then
+                    plan_dir="$1"
+                elif [ -f "$1" ]; then
+                    die "'$1' is not a directory — bd-from-plan requires a plan directory"
                 else
-                    die "plan file not found: '$1'"
+                    die "plan directory not found: '$1'"
                 fi
                 shift
                 ;;
         esac
     done
 
-    # Read plan from file if not stdin
-    if [ -z "$plan_json" ]; then
-        if [ ${#plan_files[@]} -eq 0 ]; then
-            die "usage: bd-from-plan [--dry-run] <plan.json> | bd-from-plan --stdin"
-        fi
-
-        plan_json=$(cat "${plan_files[0]}")
+    # Require a plan directory argument
+    if [ -z "$plan_dir" ]; then
+        die "usage: bd-from-plan [--dry-run] <plan-dir>"
     fi
+
+    # Merge plan directory into single JSON
+    local plan_json
+    plan_json=$(merge_plan "$plan_dir")
 
     # Detect beads prefix
     detect_beads_prefix
