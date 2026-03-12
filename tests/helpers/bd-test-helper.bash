@@ -58,32 +58,20 @@ teardown_repo() {
     fi
 }
 
-# --- Plan Fixtures ---
+# --- Plan Fixtures (directory-based) ---
+# Each fixture creates a plan directory with _plan.json + epic-*.json files.
+# Returns the plan directory path.
 
 # Create a minimal valid plan with one epic and one task
 create_minimal_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
-    cat > "$plan_file" << 'EOF'
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plan.md",
   "prefix": "test",
-  "epics": [
-    {
-      "id": "core",
-      "title": "Core Feature",
-      "source_sections": ["## 1. Core"],
-      "tasks": [
-        {
-          "id": "setup",
-          "title": "Initial setup",
-          "source_sections": ["### 1.1 Setup"],
-          "type": "task",
-          "priority": 2
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 3,
     "mapped_sections": 2,
@@ -92,65 +80,36 @@ create_minimal_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-core.json" << 'EOF'
+{
+  "id": "core",
+  "title": "Core Feature",
+  "source_sections": ["## 1. Core"],
+  "tasks": [
+    {
+      "id": "setup",
+      "title": "Initial setup",
+      "source_sections": ["### 1.1 Setup"],
+      "type": "task",
+      "priority": 2
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # Create a plan with two epics and dependencies
 create_dependency_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
-    cat > "$plan_file" << 'EOF'
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plan.md",
   "prefix": "dep",
-  "epics": [
-    {
-      "id": "model",
-      "title": "Data Models",
-      "source_sections": ["## 1. Models"],
-      "tasks": [
-        {
-          "id": "user",
-          "title": "Create User model",
-          "source_sections": ["### 1.1 User Model"],
-          "type": "feature",
-          "priority": 1,
-          "depends_on": []
-        },
-        {
-          "id": "token",
-          "title": "Create Token model",
-          "source_sections": ["### 1.2 Token Model"],
-          "type": "feature",
-          "priority": 1,
-          "depends_on": ["user"]
-        }
-      ]
-    },
-    {
-      "id": "api",
-      "title": "API Endpoints",
-      "source_sections": ["## 2. API"],
-      "tasks": [
-        {
-          "id": "login",
-          "title": "Login endpoint",
-          "source_sections": ["### 2.1 Login"],
-          "type": "feature",
-          "priority": 2,
-          "depends_on": ["model-user", "model-token"]
-        },
-        {
-          "id": "logout",
-          "title": "Logout endpoint",
-          "source_sections": ["### 2.2 Logout"],
-          "type": "feature",
-          "priority": 2,
-          "depends_on": ["login"]
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 7,
     "mapped_sections": 6,
@@ -159,13 +118,67 @@ create_dependency_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-model.json" << 'EOF'
+{
+  "id": "model",
+  "title": "Data Models",
+  "source_sections": ["## 1. Models"],
+  "tasks": [
+    {
+      "id": "user",
+      "title": "Create User model",
+      "source_sections": ["### 1.1 User Model"],
+      "type": "feature",
+      "priority": 1,
+      "depends_on": []
+    },
+    {
+      "id": "token",
+      "title": "Create Token model",
+      "source_sections": ["### 1.2 Token Model"],
+      "type": "feature",
+      "priority": 1,
+      "depends_on": ["user"]
+    }
+  ]
+}
+EOF
+
+    cat > "$plan_dir/epic-api.json" << 'EOF'
+{
+  "id": "api",
+  "title": "API Endpoints",
+  "source_sections": ["## 2. API"],
+  "tasks": [
+    {
+      "id": "login",
+      "title": "Login endpoint",
+      "source_sections": ["### 2.1 Login"],
+      "type": "feature",
+      "priority": 2,
+      "depends_on": ["model-user", "model-token"]
+    },
+    {
+      "id": "logout",
+      "title": "Logout endpoint",
+      "source_sections": ["### 2.2 Logout"],
+      "type": "feature",
+      "priority": 2,
+      "depends_on": ["login"]
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # Create a plan with quality gates and estimates
 create_full_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
-    cat > "$plan_file" << 'EOF'
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/full-plan.md",
@@ -175,46 +188,6 @@ create_full_plan() {
     "commit_strategy": "agentic-commits",
     "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit IMMEDIATELY after gate passes (do NOT batch with other tasks)\n- [ ] Commit using agentic-commits"
   },
-  "epics": [
-    {
-      "id": "core",
-      "title": "Core Implementation",
-      "description": "Main feature implementation",
-      "priority": 1,
-      "labels": ["core", "v1"],
-      "source_sections": ["## 1. Core"],
-      "tasks": [
-        {
-          "id": "model",
-          "title": "Create data model",
-          "description": "Define the main data model with proper fields and indexes",
-          "type": "feature",
-          "priority": 1,
-          "estimate_minutes": 10,
-          "labels": ["model"],
-          "depends_on": [],
-          "source_sections": ["### 1.1 Data Model"],
-          "source_lines": "10-25",
-          "acceptance": "Model created with migration and factory",
-          "commit_strategy": "agentic-commits"
-        },
-        {
-          "id": "service",
-          "title": "Implement service layer",
-          "description": "Service class with business logic",
-          "type": "feature",
-          "priority": 1,
-          "estimate_minutes": 15,
-          "depends_on": ["model"],
-          "source_sections": ["### 1.2 Service Layer"],
-          "source_lines": "26-55",
-          "acceptance": "Service methods work with tests passing",
-          "quality_gate": "composer lint && composer test",
-          "commit_strategy": "agentic-commits"
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 5,
     "mapped_sections": 3,
@@ -223,31 +196,60 @@ create_full_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-core.json" << 'EOF'
+{
+  "id": "core",
+  "title": "Core Implementation",
+  "description": "Main feature implementation",
+  "priority": 1,
+  "labels": ["core", "v1"],
+  "source_sections": ["## 1. Core"],
+  "tasks": [
+    {
+      "id": "model",
+      "title": "Create data model",
+      "description": "Define the main data model with proper fields and indexes",
+      "type": "feature",
+      "priority": 1,
+      "estimate_minutes": 10,
+      "labels": ["model"],
+      "depends_on": [],
+      "source_sections": ["### 1.1 Data Model"],
+      "source_lines": "10-25",
+      "acceptance": "Model created with migration and factory",
+      "commit_strategy": "agentic-commits"
+    },
+    {
+      "id": "service",
+      "title": "Implement service layer",
+      "description": "Service class with business logic",
+      "type": "feature",
+      "priority": 1,
+      "estimate_minutes": 15,
+      "depends_on": ["model"],
+      "source_sections": ["### 1.2 Service Layer"],
+      "source_lines": "26-55",
+      "acceptance": "Service methods work with tests passing",
+      "quality_gate": "composer lint && composer test",
+      "commit_strategy": "agentic-commits"
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # Create a plan with unmapped sections (should fail validation)
 create_unmapped_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
-    cat > "$plan_file" << 'EOF'
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plan.md",
   "prefix": "bad",
-  "epics": [
-    {
-      "id": "core",
-      "title": "Core Feature",
-      "source_sections": ["## 1. Core"],
-      "tasks": [
-        {
-          "id": "setup",
-          "title": "Initial setup",
-          "source_sections": ["### 1.1 Setup"]
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 5,
     "mapped_sections": 2,
@@ -256,38 +258,34 @@ create_unmapped_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-core.json" << 'EOF'
+{
+  "id": "core",
+  "title": "Core Feature",
+  "source_sections": ["## 1. Core"],
+  "tasks": [
+    {
+      "id": "setup",
+      "title": "Initial setup",
+      "source_sections": ["### 1.1 Setup"]
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # Create a plan with circular dependencies (should fail)
 create_circular_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
-    cat > "$plan_file" << 'EOF'
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plan.md",
   "prefix": "cyc",
-  "epics": [
-    {
-      "id": "core",
-      "title": "Core",
-      "source_sections": ["## 1. Core"],
-      "tasks": [
-        {
-          "id": "a",
-          "title": "Task A",
-          "source_sections": ["### 1.1 A"],
-          "depends_on": ["b"]
-        },
-        {
-          "id": "b",
-          "title": "Task B",
-          "source_sections": ["### 1.2 B"],
-          "depends_on": ["a"]
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 4,
     "mapped_sections": 3,
@@ -296,44 +294,41 @@ create_circular_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-core.json" << 'EOF'
+{
+  "id": "core",
+  "title": "Core",
+  "source_sections": ["## 1. Core"],
+  "tasks": [
+    {
+      "id": "a",
+      "title": "Task A",
+      "source_sections": ["### 1.1 A"],
+      "depends_on": ["b"]
+    },
+    {
+      "id": "b",
+      "title": "Task B",
+      "source_sections": ["### 1.2 B"],
+      "depends_on": ["a"]
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # Create a plan with 3-node circular dependency A->B->C->A (should fail)
 create_3node_circular_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
-    cat > "$plan_file" << 'EOF'
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plan.md",
   "prefix": "cyc3",
-  "epics": [
-    {
-      "id": "core",
-      "title": "Core",
-      "source_sections": ["## 1. Core"],
-      "tasks": [
-        {
-          "id": "a",
-          "title": "Task A",
-          "source_sections": ["### 1.1 A"],
-          "depends_on": ["c"]
-        },
-        {
-          "id": "b",
-          "title": "Task B",
-          "source_sections": ["### 1.2 B"],
-          "depends_on": ["a"]
-        },
-        {
-          "id": "c",
-          "title": "Task C",
-          "source_sections": ["### 1.3 C"],
-          "depends_on": ["b"]
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 5,
     "mapped_sections": 4,
@@ -342,36 +337,47 @@ create_3node_circular_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-core.json" << 'EOF'
+{
+  "id": "core",
+  "title": "Core",
+  "source_sections": ["## 1. Core"],
+  "tasks": [
+    {
+      "id": "a",
+      "title": "Task A",
+      "source_sections": ["### 1.1 A"],
+      "depends_on": ["c"]
+    },
+    {
+      "id": "b",
+      "title": "Task B",
+      "source_sections": ["### 1.2 B"],
+      "depends_on": ["a"]
+    },
+    {
+      "id": "c",
+      "title": "Task C",
+      "source_sections": ["### 1.3 C"],
+      "depends_on": ["b"]
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # Create a plan with duplicate IDs (should fail)
 create_duplicate_id_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
-    cat > "$plan_file" << 'EOF'
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plan.md",
   "prefix": "dup",
-  "epics": [
-    {
-      "id": "core",
-      "title": "Core",
-      "source_sections": ["## 1. Core"],
-      "tasks": [
-        {
-          "id": "setup",
-          "title": "First setup",
-          "source_sections": ["### 1.1 Setup"]
-        },
-        {
-          "id": "setup",
-          "title": "Second setup",
-          "source_sections": ["### 1.2 Setup"]
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 4,
     "mapped_sections": 3,
@@ -380,36 +386,43 @@ create_duplicate_id_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-core.json" << 'EOF'
+{
+  "id": "core",
+  "title": "Core",
+  "source_sections": ["## 1. Core"],
+  "tasks": [
+    {
+      "id": "setup",
+      "title": "First setup",
+      "source_sections": ["### 1.1 Setup"]
+    },
+    {
+      "id": "setup",
+      "title": "Second setup",
+      "source_sections": ["### 1.2 Setup"]
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # Create a plan with atomicity violations (should warn)
 create_atomicity_warning_plan() {
-    local plan_file="${1:-${REPO}/plan.json}"
+    local plan_dir="${1:-${REPO}/plan}"
+    mkdir -p "$plan_dir"
+
     # Generate a long description (> 300 chars)
     local long_desc
     long_desc=$(printf 'x%.0s' $(seq 1 350))
-    cat > "$plan_file" << EOF
+
+    cat > "$plan_dir/_plan.json" << 'EOF'
 {
   "version": 1,
   "source": "docs/plan.md",
   "prefix": "atom",
-  "epics": [
-    {
-      "id": "core",
-      "title": "Core",
-      "source_sections": ["## 1. Core"],
-      "tasks": [
-        {
-          "id": "too-big",
-          "title": "Create config and migration and model",
-          "description": "${long_desc}",
-          "estimate_minutes": 90,
-          "source_sections": ["### 1.1 A", "### 1.2 B", "### 1.3 C"]
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 5,
     "mapped_sections": 4,
@@ -418,7 +431,24 @@ create_atomicity_warning_plan() {
   }
 }
 EOF
-    echo "$plan_file"
+
+    cat > "$plan_dir/epic-core.json" << EOF
+{
+  "id": "core",
+  "title": "Core",
+  "source_sections": ["## 1. Core"],
+  "tasks": [
+    {
+      "id": "too-big",
+      "title": "Create config and migration and model",
+      "description": "${long_desc}",
+      "estimate_minutes": 90,
+      "source_sections": ["### 1.1 A", "### 1.2 B", "### 1.3 C"]
+    }
+  ]
+}
+EOF
+    echo "$plan_dir"
 }
 
 # --- Assertion Helpers ---
