@@ -28,7 +28,16 @@ Handle Stripe webhook callbacks for payment confirmation.
 Depends on payment gateway integration.
 ```
 
-### Resulting JSON Plan
+### Resulting Plan Directory
+
+```
+plan-dir/
+  _plan.json
+  epic-model.json
+  epic-payment.json
+```
+
+#### `_plan.json`
 
 ```json
 {
@@ -40,85 +49,93 @@ Depends on payment gateway integration.
     "commit_strategy": "agentic-commits",
     "checklist_note": "- [ ] Run quality gate: composer lint && composer test && composer type\n- [ ] Commit IMMEDIATELY after gate passes (do NOT batch with other tasks)\n- [ ] Commit using agentic-commits"
   },
-  "epics": [
-    {
-      "id": "model",
-      "title": "Order Model",
-      "description": "Order model and state machine implementation",
-      "priority": 1,
-      "source_sections": ["## 1. Order Model"],
-      "tasks": [
-        {
-          "id": "create",
-          "title": "Create Order model and migration",
-          "description": "Define Order model with status, total, customer_id fields. Create migration with proper indexes.",
-          "type": "feature",
-          "priority": 1,
-          "estimate_minutes": 10,
-          "depends_on": [],
-          "source_sections": ["### 1.1 Create Order Model"],
-          "source_lines": "7-10",
-          "acceptance": "Order model with migration, factory, indexes on status and customer_id",
-          "commit_strategy": "agentic-commits"
-        },
-        {
-          "id": "state-machine",
-          "title": "Implement order status state machine",
-          "description": "State machine for order lifecycle: pending -> confirmed -> shipped -> delivered",
-          "type": "feature",
-          "priority": 1,
-          "estimate_minutes": 15,
-          "depends_on": ["create"],
-          "source_sections": ["### 1.2 Order Status Machine"],
-          "source_lines": "12-15",
-          "acceptance": "State machine transitions work. Invalid transitions throw. Tests cover all paths.",
-          "commit_strategy": "agentic-commits"
-        }
-      ]
-    },
-    {
-      "id": "payment",
-      "title": "Payment Integration",
-      "description": "Stripe payment gateway integration with webhook support",
-      "priority": 2,
-      "source_sections": ["## 2. Payment Integration"],
-      "tasks": [
-        {
-          "id": "gateway",
-          "title": "Integrate Stripe payment gateway",
-          "description": "Integrate Stripe payment gateway. Requires Order model to exist.",
-          "type": "feature",
-          "priority": 2,
-          "estimate_minutes": 15,
-          "depends_on": ["model-create"],
-          "source_sections": ["### 2.1 Payment Gateway"],
-          "source_lines": "17-19",
-          "acceptance": "Stripe charges work in test mode. Error handling for failed payments.",
-          "commit_strategy": "agentic-commits"
-        },
-        {
-          "id": "webhooks",
-          "title": "Handle Stripe payment webhooks",
-          "description": "Handle Stripe webhook callbacks for payment confirmation. Depends on payment gateway.",
-          "type": "feature",
-          "priority": 2,
-          "estimate_minutes": 10,
-          "depends_on": ["gateway"],
-          "source_sections": ["### 2.2 Payment Webhooks"],
-          "source_lines": "21-23",
-          "acceptance": "Webhook endpoint validates signatures. Payment confirmed updates order status.",
-          "quality_gate": "composer lint && composer test",
-          "commit_strategy": "agentic-commits"
-        }
-      ]
-    }
-  ],
   "coverage": {
     "total_sections": 8,
     "mapped_sections": 6,
     "unmapped": [],
     "context_only": ["# Order Processing System", "## Overview"]
   }
+}
+```
+
+#### `epic-model.json`
+
+```json
+{
+  "id": "model",
+  "title": "Order Model",
+  "description": "Order model and state machine implementation",
+  "priority": 1,
+  "source_sections": ["## 1. Order Model"],
+  "tasks": [
+    {
+      "id": "create",
+      "title": "Create Order model and migration",
+      "description": "Define Order model with status, total, customer_id fields. Create migration with proper indexes.",
+      "type": "feature",
+      "priority": 1,
+      "estimate_minutes": 10,
+      "depends_on": [],
+      "source_sections": ["### 1.1 Create Order Model"],
+      "source_lines": "7-10",
+      "acceptance": "Order model with migration, factory, indexes on status and customer_id",
+      "commit_strategy": "agentic-commits"
+    },
+    {
+      "id": "state-machine",
+      "title": "Implement order status state machine",
+      "description": "State machine for order lifecycle: pending -> confirmed -> shipped -> delivered",
+      "type": "feature",
+      "priority": 1,
+      "estimate_minutes": 15,
+      "depends_on": ["create"],
+      "source_sections": ["### 1.2 Order Status Machine"],
+      "source_lines": "12-15",
+      "acceptance": "State machine transitions work. Invalid transitions throw. Tests cover all paths.",
+      "commit_strategy": "agentic-commits"
+    }
+  ]
+}
+```
+
+#### `epic-payment.json`
+
+```json
+{
+  "id": "payment",
+  "title": "Payment Integration",
+  "description": "Stripe payment gateway integration with webhook support",
+  "priority": 2,
+  "source_sections": ["## 2. Payment Integration"],
+  "tasks": [
+    {
+      "id": "gateway",
+      "title": "Integrate Stripe payment gateway",
+      "description": "Integrate Stripe payment gateway. Requires Order model to exist.",
+      "type": "feature",
+      "priority": 2,
+      "estimate_minutes": 15,
+      "depends_on": ["model-create"],
+      "source_sections": ["### 2.1 Payment Gateway"],
+      "source_lines": "17-19",
+      "acceptance": "Stripe charges work in test mode. Error handling for failed payments.",
+      "commit_strategy": "agentic-commits"
+    },
+    {
+      "id": "webhooks",
+      "title": "Handle Stripe payment webhooks",
+      "description": "Handle Stripe webhook callbacks for payment confirmation. Depends on payment gateway.",
+      "type": "feature",
+      "priority": 2,
+      "estimate_minutes": 10,
+      "depends_on": ["gateway"],
+      "source_sections": ["### 2.2 Payment Webhooks"],
+      "source_lines": "21-23",
+      "acceptance": "Webhook endpoint validates signatures. Payment confirmed updates order status.",
+      "quality_gate": "composer lint && composer test",
+      "commit_strategy": "agentic-commits"
+    }
+  ]
 }
 ```
 
@@ -172,6 +189,7 @@ This means kebab-case task IDs (e.g., `create-lock-model`) work correctly in bot
 
 ## Coverage Failure Example
 
+In `_plan.json`:
 ```json
 {
   "coverage": {
@@ -196,7 +214,7 @@ Fix: Add tasks for these sections or mark them as context_only
 ## Dry Run Output
 
 ```bash
-bd-from-plan --dry-run "$PLAN_FILE"
+bd-from-plan --dry-run "$PLAN_DIR"
 ```
 
 ```
