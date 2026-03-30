@@ -1,11 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # bd-from-plan: Execute a task plan — create beads epics, tasks, and dependencies from JSON
 #
 # Separates semantic analysis (AI agent) from mechanical execution (this script).
 # The AI agent reads a markdown plan, produces a JSON task plan directory.
 # This script executes the plan: creating epics, tasks, wiring dependencies.
 #
-# Usage: bd-from-plan [--dry-run] <plan-dir>
+# Usage: bd-from-plan [--dry-run] [--strict] [--validate] [--stats] <plan-dir>
 #
 # Plan directory format:
 #   plan-dir/
@@ -27,24 +27,46 @@
 # Exit codes: 0 = success, 1 = error
 
 set -euo pipefail
+shopt -s inherit_errexit 2>/dev/null || true  # propagate errexit into command substitutions (bash 4.4+)
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m'
+# Single temp directory for all scratch files (cleaned up on exit)
+TMPDIR_BD=$(mktemp -d "${TMPDIR:-/tmp}/bd-from-plan-XXXXXX") || exit 1
+trap 'rm -rf "$TMPDIR_BD"' EXIT
+
+# Plan JSON file path (set in main after merge, used by all functions)
+PLAN_FILE=""
+
+# Colors for output (respect NO_COLOR standard: https://no-color.org)
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    DIM='\033[2m'
+    NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' DIM='' NC=''
+fi
 
 # Global state
 DRY_RUN=0
+STRICT=0
+VALIDATE_ONLY=0
+STATS_ONLY=0
+QUIET=0
 BEADS_PREFIX=""
 _epics_created=0
+_epics_skipped=0
 _tasks_created=0
+_tasks_skipped=0
+_tasks_expected=0
+_tasks_failed=0
 _deps_created=0
+_deps_skipped=0
 _warnings=0
+_atomicity_violations=0
 
 # --- Helpers ---
 
@@ -54,10 +76,12 @@ die() {
 }
 
 info() {
+    [ "$QUIET" -eq 1 ] && return 0
     echo -e "${BLUE}->${NC} $1"
 }
 
 success() {
+    [ "$QUIET" -eq 1 ] && return 0
     echo -e "${GREEN}ok${NC} $1"
 }
 
@@ -67,6 +91,7 @@ warn() {
 }
 
 section() {
+    [ "$QUIET" -eq 1 ] && return 0
     echo ""
     echo -e "${BOLD}${CYAN}$1${NC}"
     echo -e "${DIM}$(printf '%.0s-' $(seq 1 ${#1}))${NC}"
@@ -123,24 +148,29 @@ merge_plan() {
     done
 
     # Merge: read meta, add epics array from epic files
-    local meta_json
-    meta_json=$(cat "$meta_file")
+    # Use temp file + --slurpfile to avoid ARG_MAX limits for large plans
+    local epics_tmpfile="$TMPDIR_BD/epics.json"
 
-    # Build epics array by concatenating all epic file contents
-    local epics_json="["
+    # Build epics array as a file (avoids passing large JSON via command-line args)
+    echo "[" > "$epics_tmpfile"
     local first=1
     for epic_file in "${epic_files[@]}"; do
         if [ "$first" -eq 1 ]; then
             first=0
         else
-            epics_json+=","
+            echo "," >> "$epics_tmpfile"
         fi
-        epics_json+=$(cat "$epic_file")
+        cat "$epic_file" >> "$epics_tmpfile"
     done
-    epics_json+="]"
+    echo "]" >> "$epics_tmpfile"
 
-    # Merge meta + epics using jq
-    echo "$meta_json" | jq --argjson epics "$epics_json" '. + {epics: $epics}'
+    # Validate the merged epics array
+    if ! jq empty "$epics_tmpfile" 2>/dev/null; then
+        die "merged epics array is invalid JSON — check epic files for syntax errors"
+    fi
+
+    # Merge meta + epics using --slurpfile (no ARG_MAX limit)
+    jq --slurpfile epics "$epics_tmpfile" '. + {epics: $epics[0]}' "$meta_file"
 }
 
 # Detect the beads database prefix (e.g., "bd-myrepo")
@@ -166,17 +196,15 @@ task_full_id() {
 # --- Plan Validation ---
 
 validate_plan() {
-    local plan_json="$1"
-
     # Check valid JSON
-    if ! echo "$plan_json" | jq empty 2>/dev/null; then
+    if ! jq empty "$PLAN_FILE" 2>/dev/null; then
         echo -e "${RED}ERROR:${NC} invalid JSON in plan" >&2
         return 1
     fi
 
     # Structural validation
     local errors
-    errors=$(echo "$plan_json" | jq -r '
+    errors=$(jq -r '
         def validate:
             # epics must be a non-empty array
             (if (.epics | type) != "array" then ["missing or invalid epics array"] else [] end) +
@@ -222,13 +250,18 @@ validate_plan() {
                              then "epics[\($i)].tasks[\($j)]: missing or empty title" else empty end),
 
                             (if (.source_sections | type) != "array" or (.source_sections | length) == 0
-                             then "epics[\($i)].tasks[\($j)]: missing or empty source_sections" else empty end)
+                             then "epics[\($i)].tasks[\($j)]: missing or empty source_sections" else empty end),
+
+                            # estimate_minutes is required and must be a positive number
+                            (if (.estimate_minutes == null) or ((.estimate_minutes | type) != "number") or (.estimate_minutes <= 0)
+                             then "epics[\($i)].tasks[\($j)]: missing or invalid estimate_minutes (must be a positive number)"
+                             else empty end)
                     else empty end)
                 ]
             else [] end);
 
         validate | .[]
-    ' 2>/dev/null)
+    ' "$PLAN_FILE" 2>/dev/null)
 
     if [ -n "$errors" ]; then
         while IFS= read -r err; do
@@ -239,7 +272,7 @@ validate_plan() {
 
     # Atomicity warnings (non-fatal but prominent)
     local atomicity_warnings
-    atomicity_warnings=$(echo "$plan_json" | jq -r '
+    atomicity_warnings=$(jq -r '
         [.epics[] | .id as $epic_id | .tasks | to_entries[] | .key as $j | .value |
             # Rule 3: Max 15 minutes
             (if .estimate_minutes != null and .estimate_minutes > 15 then
@@ -264,25 +297,50 @@ validate_plan() {
             # Rule 7: Noun Count — title is too long (> 8 words suggests mixed concerns)
             (if .title != null and (.title | split(" ") | length) > 8 then
                 "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: title is \(.title | split(" ") | length) words — simplify or split"
+            else empty end),
+
+            # Rule 6: Acceptance Criteria Count — more than 3 distinct checkpoints = multiple concerns
+            (if .acceptance != null and (.acceptance | length) > 0 then
+                (.acceptance | [splits("\\. |; ")] | map(select(length > 0)) | length) as $criteria_count |
+                if $criteria_count > 3 then
+                    "ATOMICITY: epics[\($epic_id)].tasks[\(.id)]: acceptance has \($criteria_count) checkpoints (max 3) — task combines multiple concerns"
+                else empty end
             else empty end)
         ] | .[]
-    ' 2>/dev/null) || true
+    ' "$PLAN_FILE" 2>/dev/null) || true
 
     if [ -n "$atomicity_warnings" ]; then
-        echo "" >&2
-        echo -e "${YELLOW}${BOLD}ATOMICITY WARNINGS${NC}" >&2
-        echo -e "${YELLOW}Each task should address ONE concern, ONE file, and be completable in ≤ 15 minutes.${NC}" >&2
-        echo -e "${YELLOW}Apply the recursive decomposition algorithm: split until every task passes every check.${NC}" >&2
-        echo "" >&2
-        while IFS= read -r w; do
-            echo -e "${YELLOW}!!${NC} $w" >&2
-        done <<< "$atomicity_warnings"
-        echo "" >&2
+        # Count violations
+        _atomicity_violations=$(echo "$atomicity_warnings" | wc -l | tr -d ' ')
+
+        if [ "$STRICT" -eq 1 ]; then
+            echo "" >&2
+            echo -e "${RED}${BOLD}ATOMICITY ERRORS (--strict mode)${NC}" >&2
+            echo -e "${RED}${_atomicity_violations} violation(s) — plan REJECTED. Fix all violations before creation.${NC}" >&2
+            echo -e "${RED}Each task must address ONE concern, ONE file, and be completable in ≤ 15 minutes.${NC}" >&2
+            echo "" >&2
+            while IFS= read -r w; do
+                echo -e "${RED}!!${NC} $w" >&2
+            done <<< "$atomicity_warnings"
+            echo "" >&2
+            return 1
+        else
+            echo "" >&2
+            echo -e "${YELLOW}${BOLD}ATOMICITY WARNINGS${NC}" >&2
+            echo -e "${YELLOW}Each task should address ONE concern, ONE file, and be completable in ≤ 15 minutes.${NC}" >&2
+            echo -e "${YELLOW}Apply the recursive decomposition algorithm: split until every task passes every check.${NC}" >&2
+            echo -e "${YELLOW}Use --strict to enforce these as errors.${NC}" >&2
+            echo "" >&2
+            while IFS= read -r w; do
+                echo -e "${YELLOW}!!${NC} $w" >&2
+            done <<< "$atomicity_warnings"
+            echo "" >&2
+        fi
     fi
 
     # Duplicate ID check
     local dup_errors
-    dup_errors=$(echo "$plan_json" | jq -r '
+    dup_errors=$(jq -r '
         # Collect all full task IDs (plan-level, without beads prefix)
         [.prefix as $p |
          .epics[] | .id as $eid |
@@ -291,7 +349,7 @@ validate_plan() {
         if length > 0 then
             "duplicate task IDs: " + join(", ")
         else empty end
-    ' 2>/dev/null) || true
+    ' "$PLAN_FILE" 2>/dev/null) || true
 
     if [ -n "$dup_errors" ]; then
         echo -e "${RED}ERROR:${NC} $dup_errors" >&2
@@ -305,10 +363,8 @@ validate_plan() {
 
 # Check for circular dependencies using DFS
 check_cycles() {
-    local plan_json="$1"
-
     local cycle_result
-    cycle_result=$(echo "$plan_json" | jq -r '
+    cycle_result=$(jq -r '
         # Build lookup of all full_ids for smart resolution
         [.epics[] | .id as $eid | .tasks[] | "\($eid)-\(.id)"] as $all_ids |
 
@@ -357,7 +413,7 @@ check_cycles() {
         if . != null and .found then
             "CYCLE: " + (.cycle | join(" -> "))
         else empty end
-    ' 2>/dev/null) || true
+    ' "$PLAN_FILE" 2>/dev/null) || true
 
     if [ -n "$cycle_result" ]; then
         echo -e "${RED}ERROR:${NC} circular dependency detected: $cycle_result" >&2
@@ -370,9 +426,7 @@ check_cycles() {
 # Topological sort of tasks
 # Output: space-separated list of "epicId-taskId" in dependency order
 topological_sort() {
-    local plan_json="$1"
-
-    echo "$plan_json" | jq -r '
+    jq -r '
         # Build lookup of all full_ids for smart resolution
         [.epics[] | .id as $eid | .tasks[] | "\($eid)-\(.id)"] as $all_ids |
 
@@ -407,7 +461,9 @@ topological_sort() {
             )) as $ready |
 
             if ($ready | length) == 0 then
-                .remaining = [] | .sorted = (.sorted + .remaining)
+                # Deadlock-break: dump remaining tasks into sorted order
+                # IMPORTANT: capture .remaining BEFORE clearing it
+                .sorted = (.sorted + .remaining) | .remaining = []
             else
                 .sorted = (.sorted + $ready) |
                 .remaining = ([.remaining[] | select(. as $id | $ready | all(. != $id))])
@@ -418,7 +474,7 @@ topological_sort() {
             ($all | map(select(.full_id == $fid)) | .[0]) |
             "\(.epic_id)::\(.task_id)"
         ] | join(" ")
-    '
+    ' "$PLAN_FILE"
 }
 
 # --- Task Creation ---
@@ -430,14 +486,13 @@ resolve_dep_id() {
     local dep_ref="$1"
     local current_epic="$2"
     local plan_prefix="$3"
-    local plan_json="$4"
 
     # Check if dep_ref exactly matches any epicId-taskId in the plan
     local is_exact
-    is_exact=$(echo "$plan_json" | jq -r --arg dep "$dep_ref" '
+    is_exact=$(jq -r --arg dep "$dep_ref" '
         [.epics[] | .id as $eid | .tasks[] | "\($eid)-\(.id)"] |
         if any(. == $dep) then "yes" else "no" end
-    ')
+    ' "$PLAN_FILE")
 
     if [ "$is_exact" = "yes" ]; then
         # Exact match: dep_ref is already epicId-taskId
@@ -450,21 +505,20 @@ resolve_dep_id() {
 
 # Create a single epic via bd create --type epic --id
 create_epic() {
-    local plan_json="$1"
-    local epic_idx="$2"
+    local epic_idx="$1"
 
-    local epic_json
-    epic_json=$(echo "$plan_json" | jq ".epics[$epic_idx]")
+    # Batch extract all epic fields in one jq call
+    local epic_id title description priority labels
+    {
+        read -r epic_id
+        read -r title
+        read -r description
+        read -r priority
+        read -r labels
+    } < <(jq -r ".epics[$epic_idx] | [.id, .title, (.description // \"\"), (.priority // 2 | tostring), ((.labels // []) | join(\",\"))] | .[]" "$PLAN_FILE")
 
     local plan_prefix
-    plan_prefix=$(echo "$plan_json" | jq -r '.prefix // "plan"')
-
-    local epic_id title description priority labels
-    epic_id=$(echo "$epic_json" | jq -r '.id')
-    title=$(echo "$epic_json" | jq -r '.title')
-    description=$(echo "$epic_json" | jq -r '.description // ""')
-    priority=$(echo "$epic_json" | jq -r '.priority // 2')
-    labels=$(echo "$epic_json" | jq -r '(.labels // []) | join(",")')
+    plan_prefix=$(jq -r '.prefix // "plan"' "$PLAN_FILE")
 
     local full_id
     full_id=$(epic_full_id "$plan_prefix" "$epic_id")
@@ -484,41 +538,65 @@ create_epic() {
         args+=(--labels "$labels")
     fi
 
-    if "${args[@]}" >/dev/null 2>&1; then
+    if "${args[@]}" >/dev/null 2>"$TMPDIR_BD/epic-err.txt"; then
         success "  Created epic: ${full_id} (${title})"
         _epics_created=$((_epics_created + 1))
     else
-        warn "  Failed to create epic: ${full_id} (may already exist)"
+        local epic_err_msg
+        epic_err_msg=$(cat "$TMPDIR_BD/epic-err.txt" 2>/dev/null)
+        if [[ "$epic_err_msg" == *"already exists"* ]] || [[ "$epic_err_msg" == *"duplicate"* ]]; then
+            info "  Epic already exists: ${full_id} (skipping)"
+            _epics_skipped=$((_epics_skipped + 1))
+        else
+            warn "  Failed to create epic: ${full_id}: ${epic_err_msg}"
+        fi
     fi
 }
 
 # Create a single task via --parent (auto-ID) then bd rename to target ID
 create_task() {
-    local plan_json="$1"
-    local epic_id="$2"
-    local task_id="$3"
+    local epic_id="$1"
+    local task_id="$2"
 
     local plan_prefix
-    plan_prefix=$(echo "$plan_json" | jq -r '.prefix // "plan"')
+    plan_prefix=$(jq -r '.prefix // "plan"' "$PLAN_FILE")
 
-    local task_json
-    task_json=$(echo "$plan_json" | jq --arg eid "$epic_id" --arg tid "$task_id" '
-        .epics[] | select(.id == $eid) | .tasks[] | select(.id == $tid)
-    ')
+    # Batch extract all task fields in a single jq call (replaces ~10 separate calls)
+    local task_extract="$TMPDIR_BD/task-extract.json"
+    jq --arg eid "$epic_id" --arg tid "$task_id" '
+        .epics[] | select(.id == $eid) | .tasks[] | select(.id == $tid) |
+        {
+            title, type: (.type // "task"), priority: (.priority // 2 | tostring),
+            estimate: (.estimate_minutes // "" | tostring),
+            description: (.description // ""), acceptance: (.acceptance // ""),
+            labels: ((.labels // []) | join(",")),
+            quality_gate: (.quality_gate // ""),
+            commit_strategy: (.commit_strategy // ""),
+            source_lines: (.source_lines // ""),
+            source_sections: ((.source_sections // []) | join(", ")),
+            dep_list: ((.depends_on // []) | join(", "))
+        }
+    ' "$PLAN_FILE" > "$task_extract"
 
-    if [ -z "$task_json" ] || [ "$task_json" = "null" ]; then
+    if [ ! -s "$task_extract" ]; then
         warn "  Task not found: ${epic_id}-${task_id}"
         return 1
     fi
 
     local title type priority estimate description acceptance labels
-    title=$(echo "$task_json" | jq -r '.title')
-    type=$(echo "$task_json" | jq -r '.type // "task"')
-    priority=$(echo "$task_json" | jq -r '.priority // 2')
-    estimate=$(echo "$task_json" | jq -r '.estimate_minutes // empty')
-    description=$(echo "$task_json" | jq -r '.description // ""')
-    acceptance=$(echo "$task_json" | jq -r '.acceptance // ""')
-    labels=$(echo "$task_json" | jq -r '(.labels // []) | join(",")')
+    local quality_gate commit_strategy source_lines source_sections dep_list
+    title=$(jq -r '.title' "$task_extract")
+    type=$(jq -r '.type' "$task_extract")
+    priority=$(jq -r '.priority' "$task_extract")
+    estimate=$(jq -r '.estimate' "$task_extract")
+    description=$(jq -r '.description' "$task_extract")
+    acceptance=$(jq -r '.acceptance' "$task_extract")
+    labels=$(jq -r '.labels' "$task_extract")
+    quality_gate=$(jq -r '.quality_gate' "$task_extract")
+    commit_strategy=$(jq -r '.commit_strategy' "$task_extract")
+    source_lines=$(jq -r '.source_lines' "$task_extract")
+    source_sections=$(jq -r '.source_sections' "$task_extract")
+    dep_list=$(jq -r '.dep_list' "$task_extract")
 
     local target_id
     target_id=$(task_full_id "$plan_prefix" "$epic_id" "$task_id")
@@ -528,26 +606,22 @@ create_task() {
     # Build enriched description
     local full_description="$description"
 
-    # Resolve quality gate: task-level string overrides workflow-level string
-    local quality_gate
-    quality_gate=$(echo "$task_json" | jq -r --argjson plan "$plan_json" '
-        .quality_gate // $plan.workflow.quality_gate // empty
-    ')
+    # Resolve quality gate: task-level overrides workflow-level
+    if [ -z "$quality_gate" ]; then
+        quality_gate=$(jq -r '.workflow.quality_gate // ""' "$PLAN_FILE")
+    fi
     if [ -n "$quality_gate" ]; then
         full_description="${full_description}\nQuality Gate: ${quality_gate}"
     fi
 
     # Resolve commit strategy: task-level overrides workflow-level
-    local commit_strategy
-    commit_strategy=$(echo "$task_json" | jq -r --argjson plan "$plan_json" '
-        .commit_strategy // $plan.workflow.commit_strategy // "agentic-commits"
-    ')
+    if [ -z "$commit_strategy" ]; then
+        commit_strategy=$(jq -r '.workflow.commit_strategy // ""' "$PLAN_FILE")
+        commit_strategy="${commit_strategy:-agentic-commits}"
+    fi
     full_description="${full_description}\nCommit Strategy: ${commit_strategy}"
 
     # Source reference
-    local source_lines source_sections
-    source_lines=$(echo "$task_json" | jq -r '.source_lines // empty')
-    source_sections=$(echo "$task_json" | jq -r '(.source_sections // []) | join(", ")')
     if [ -n "$source_sections" ]; then
         full_description="${full_description}\nSource: ${source_sections}"
         if [ -n "$source_lines" ]; then
@@ -557,7 +631,7 @@ create_task() {
 
     # Append workflow checklist at the end of every task description
     local checklist_note
-    checklist_note=$(echo "$plan_json" | jq -r '.workflow.checklist_note // empty')
+    checklist_note=$(jq -r '.workflow.checklist_note // ""' "$PLAN_FILE")
     if [ -n "$checklist_note" ]; then
         full_description="${full_description}\n\n---\nChecklist:\n${checklist_note}"
     fi
@@ -567,8 +641,6 @@ create_task() {
     full_description="${full_description}\n- [ ] Close this task when done: bd close ${target_id}"
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        local dep_list
-        dep_list=$(echo "$task_json" | jq -r '(.depends_on // []) | join(", ")')
         echo -e "  ${DIM}[dry-run]${NC} bd create --type ${type} --parent ${parent_id} -> rename to ${target_id} \"${title}\" [P${priority}]"
         if [ -n "$dep_list" ]; then
             echo -e "           ${DIM}deps: ${dep_list}${NC}"
@@ -583,9 +655,8 @@ create_task() {
     local -a args=(bd create "$title" --type "$type" --parent "$parent_id" --priority "$priority" --silent)
 
     # Write description to temp file for --body-file
-    local desc_file=""
+    local desc_file="$TMPDIR_BD/desc-${epic_id}-${task_id}.txt"
     if [ -n "$full_description" ]; then
-        desc_file=$(mktemp /tmp/bd-desc-XXXXXX)
         echo -e "$full_description" > "$desc_file"
         args+=(--body-file "$desc_file")
     fi
@@ -602,44 +673,42 @@ create_task() {
 
     # Create task (gets auto ID like parent.1, parent.2, etc.)
     local auto_id
-    if auto_id=$("${args[@]}" 2>/dev/null); then
+    if auto_id=$("${args[@]}" 2>"$TMPDIR_BD/task-err.txt"); then
         auto_id=$(echo "$auto_id" | tr -d '[:space:]')
 
         # Rename auto ID to our target ID
-        if bd rename "$auto_id" "$target_id" >/dev/null 2>&1; then
+        if bd rename "$auto_id" "$target_id" >/dev/null 2>"$TMPDIR_BD/rename-err.txt"; then
             success "  Created task: ${target_id} (${title}) [P${priority}]"
             _tasks_created=$((_tasks_created + 1))
         else
-            # Rename failed but task was created
-            warn "  Created as ${auto_id} but rename to ${target_id} failed"
+            warn "  Created as ${auto_id} but rename to ${target_id} failed: $(cat "$TMPDIR_BD/rename-err.txt" 2>/dev/null)"
             _tasks_created=$((_tasks_created + 1))
         fi
     else
-        warn "  Failed to create task: ${target_id} (may already exist)"
-    fi
-
-    # Cleanup
-    if [ -n "$desc_file" ]; then
-        rm -f "$desc_file"
+        local task_err_msg
+        task_err_msg=$(cat "$TMPDIR_BD/task-err.txt" 2>/dev/null)
+        if [[ "$task_err_msg" == *"already exists"* ]] || [[ "$task_err_msg" == *"duplicate"* ]]; then
+            info "  Task already exists: ${target_id} (skipping)"
+            _tasks_skipped=$((_tasks_skipped + 1))
+        else
+            warn "  Failed to create task: ${target_id}: ${task_err_msg}"
+            _tasks_failed=$((_tasks_failed + 1))
+        fi
     fi
 }
 
 # Wire dependencies for a task
 wire_dependencies() {
-    local plan_json="$1"
-    local epic_id="$2"
-    local task_id="$3"
+    local epic_id="$1"
+    local task_id="$2"
 
     local plan_prefix
-    plan_prefix=$(echo "$plan_json" | jq -r '.prefix // "plan"')
-
-    local task_json
-    task_json=$(echo "$plan_json" | jq --arg eid "$epic_id" --arg tid "$task_id" '
-        .epics[] | select(.id == $eid) | .tasks[] | select(.id == $tid)
-    ')
+    plan_prefix=$(jq -r '.prefix // "plan"' "$PLAN_FILE")
 
     local deps
-    deps=$(echo "$task_json" | jq -r '(.depends_on // [])[]')
+    deps=$(jq -r --arg eid "$epic_id" --arg tid "$task_id" '
+        .epics[] | select(.id == $eid) | .tasks[] | select(.id == $tid) | (.depends_on // [])[]
+    ' "$PLAN_FILE")
 
     if [ -z "$deps" ]; then
         return 0
@@ -650,32 +719,197 @@ wire_dependencies() {
 
     while IFS= read -r dep_ref; do
         local dep_full_id
-        dep_full_id=$(resolve_dep_id "$dep_ref" "$epic_id" "$plan_prefix" "$plan_json")
+        dep_full_id=$(resolve_dep_id "$dep_ref" "$epic_id" "$plan_prefix")
 
         if [ "$DRY_RUN" -eq 1 ]; then
             echo -e "  ${DIM}[dry-run]${NC} bd dep add ${full_id} ${dep_full_id}"
         else
-            if bd dep add "$full_id" "$dep_full_id" --quiet 2>/dev/null; then
+            if bd dep add "$full_id" "$dep_full_id" --quiet 2>"$TMPDIR_BD/dep-err.txt"; then
                 success "    Dep: ${full_id} depends on ${dep_full_id}"
                 _deps_created=$((_deps_created + 1))
             else
-                warn "    Failed to add dep: ${full_id} -> ${dep_full_id}"
+                warn "    Failed to add dep: ${full_id} -> ${dep_full_id}: $(cat "$TMPDIR_BD/dep-err.txt" 2>/dev/null)"
             fi
         fi
     done <<< "$deps"
 }
 
+# --- Parallelism Analysis ---
+
+# Compute DAG levels, max parallelism, and critical path
+# Each level = set of tasks that can run in parallel once previous levels complete
+# Args: $1 = plan JSON
+# Output: prints parallelism report to stdout
+parallelism_report() {
+    jq -r '
+        # Build lookup of all full_ids for smart resolution
+        [.epics[] | .id as $eid | .tasks[] | "\($eid)-\(.id)"] as $all_ids |
+
+        # Build task list with resolved deps and estimates
+        [.epics[] | .id as $eid | .tasks[] |
+            {
+                full_id: "\($eid)-\(.id)",
+                estimate: (.estimate_minutes // 0),
+                deps: [(.depends_on // [])[] | . as $dep |
+                    if ($all_ids | any(. == $dep)) then $dep
+                    else "\($eid)-\($dep)"
+                    end
+                ]
+            }
+        ] as $tasks |
+
+        # Build adjacency lookup
+        ($tasks | map({(.full_id): .deps}) | add // {}) as $adj |
+        ($tasks | map({(.full_id): .estimate}) | add // {}) as $est |
+
+        # Compute level for each task: level = max(level of deps) + 1
+        # Iterative fixed-point computation
+        ($tasks | map({(.full_id): -1}) | add // {}) as $init_levels |
+        {levels: $init_levels, changed: true, iter: 0} |
+        until(.changed == false or .iter > 100;
+            .levels as $prev |
+            reduce ($tasks[].full_id) as $id (
+                {levels: $prev, changed: false};
+                . as $acc |
+                ($adj[$id] // []) as $deps |
+                if ($deps | length) == 0 then
+                    if $acc.levels[$id] != 0 then
+                        $acc | .levels[$id] = 0 | .changed = true
+                    else $acc end
+                else
+                    ([$deps[] as $d | $acc.levels[$d] // -1] | if any(. == -1) then -1 else max + 1 end) as $new_level |
+                    if $new_level != $acc.levels[$id] then
+                        $acc | .levels[$id] = $new_level | .changed = true
+                    else $acc end
+                end
+            ) |
+            .iter += 1
+        ) |
+        .levels as $levels |
+
+        # Group tasks by level
+        [$tasks[] | {full_id, estimate, level: $levels[.full_id]}] |
+        group_by(.level) | sort_by(.[0].level) |
+
+        # Compute per-level stats
+        {
+            level_count: length,
+            levels: [.[] |
+                {
+                    level: .[0].level,
+                    task_count: length,
+                    tasks: [.[].full_id],
+                    max_estimate: ([.[].estimate] | max),
+                    total_estimate: ([.[].estimate] | add)
+                }
+            ],
+            critical_path_minutes: [.[] | [.[].estimate] | max] | add,
+            total_estimate: [$tasks[].estimate] | add,
+            max_parallelism: [.[] | length] | max,
+            total_tasks: ($tasks | length)
+        } |
+
+        # Format output
+        "  Parallelism levels: \(.level_count)",
+        "  Max parallel tasks: \(.max_parallelism)",
+        "  Critical path:      \(.critical_path_minutes)m (sequential bottleneck)",
+        "  Total estimate:     \(.total_estimate)m (if fully sequential)",
+        "  Speedup potential:  \(if .critical_path_minutes > 0 then ((.total_estimate / .critical_path_minutes * 10 | floor) / 10) else 1 end)x with parallel agents",
+        "",
+        (.levels[] |
+            "  Level \(.level): \(.task_count) task(s), bottleneck \(.max_estimate)m" +
+            if .task_count <= 5 then " — " + (.tasks | join(", "))
+            else "" end
+        )
+    ' "$PLAN_FILE"
+}
+
+# --- Plan Statistics ---
+
+# Compute and display comprehensive plan statistics
+plan_stats() {
+    section "Plan Statistics"
+
+    # Basic counts and estimates
+    jq -r '
+        {
+            epic_count: (.epics | length),
+            task_count: [.epics[].tasks[]] | length,
+            total_estimate: [.epics[].tasks[] | .estimate_minutes // 0] | add // 0,
+            min_estimate: [.epics[].tasks[] | .estimate_minutes // 0] | min // 0,
+            max_estimate: [.epics[].tasks[] | .estimate_minutes // 0] | max // 0,
+            avg_estimate: (([.epics[].tasks[] | .estimate_minutes // 0] | add // 0) / ([.epics[].tasks[]] | length)),
+            tasks_with_deps: [.epics[].tasks[] | select((.depends_on // []) | length > 0)] | length,
+            tasks_no_deps: [.epics[].tasks[] | select((.depends_on // []) | length == 0)] | length,
+            cross_epic_deps: [.epics[] | .id as $eid | .tasks[] | (.depends_on // [])[] | select(contains("-"))] | length
+        } |
+        "  Epics:              \(.epic_count)",
+        "  Tasks:              \(.task_count)",
+        "  Estimates:          min \(.min_estimate)m, avg \(.avg_estimate | floor)m, max \(.max_estimate)m, total \(.total_estimate)m",
+        "  With dependencies:  \(.tasks_with_deps) tasks (\(.tasks_no_deps) independent)",
+        "  Cross-epic deps:    \(.cross_epic_deps)"
+    ' "$PLAN_FILE"
+
+    # Per-epic breakdown
+    echo ""
+    echo -e "  ${BOLD}Per-Epic Breakdown:${NC}"
+    jq -r '
+        .epics[] |
+        "    \(.id): \(.tasks | length) tasks, \([.tasks[] | .estimate_minutes // 0] | add // 0)m total"
+    ' "$PLAN_FILE"
+
+    # Parallelism analysis
+    echo ""
+    echo -e "  ${BOLD}Parallelism Analysis:${NC}"
+    parallelism_report
+
+    # Plan size heuristic
+    local source_file
+    source_file=$(jq -r '.source // empty' "$PLAN_FILE")
+    if [ -n "$source_file" ] && [ -f "$source_file" ]; then
+        local line_count
+        line_count=$(wc -l < "$source_file" | tr -d ' ')
+        local task_count
+        task_count=$(jq '[.epics[].tasks[]] | length' "$PLAN_FILE")
+
+        echo ""
+        echo -e "  ${BOLD}Plan Size Heuristic:${NC}"
+        echo "  Source: ${source_file} (${line_count} lines)"
+
+        # Expected range based on documented calibration
+        local min_expected max_expected
+        if [ "$line_count" -le 100 ]; then
+            min_expected=12; max_expected=25
+        elif [ "$line_count" -le 500 ]; then
+            min_expected=40; max_expected=70
+        elif [ "$line_count" -le 1000 ]; then
+            min_expected=70; max_expected=120
+        else
+            min_expected=120; max_expected=200
+        fi
+
+        echo "  Expected tasks: ${min_expected}–${max_expected} (for ${line_count}-line plan)"
+        echo "  Actual tasks:   ${task_count}"
+
+        if [ "$task_count" -lt "$min_expected" ]; then
+            warn "  Under-decomposed: ${task_count} tasks is below expected minimum of ${min_expected} for a ${line_count}-line plan"
+        elif [ "$task_count" -gt "$max_expected" ]; then
+            echo -e "  ${GREEN}Well-decomposed${NC} (above expected range — good for parallelism)"
+        else
+            echo -e "  ${GREEN}Within expected range${NC}"
+        fi
+    fi
+}
+
 # --- Process Plan ---
 
 process_plan() {
-    local plan_json="$1"
-
     local plan_prefix
-    plan_prefix=$(echo "$plan_json" | jq -r '.prefix // "plan"')
+    plan_prefix=$(jq -r '.prefix // "plan"' "$PLAN_FILE")
     local source
-    source=$(echo "$plan_json" | jq -r '.source // "unknown"')
+    source=$(jq -r '.source // "unknown"' "$PLAN_FILE")
     local epic_count
-    epic_count=$(echo "$plan_json" | jq '.epics | length')
+    epic_count=$(jq '.epics | length' "$PLAN_FILE")
 
     if [ "$DRY_RUN" -eq 1 ]; then
         section "DRY RUN - No changes will be made"
@@ -689,26 +923,45 @@ process_plan() {
     # Phase 1: Create epics
     section "Creating Epics"
     for i in $(seq 0 $((epic_count - 1))); do
-        create_epic "$plan_json" "$i"
+        create_epic "$i"
     done
 
     # Phase 2: Topological sort and create tasks
     section "Creating Tasks (topological order)"
     local sorted_tasks
-    sorted_tasks=$(topological_sort "$plan_json")
+    sorted_tasks=$(topological_sort)
 
     if [ -z "$sorted_tasks" ]; then
         warn "No tasks to create"
         return 0
     fi
 
+    # Count expected tasks from plan JSON
+    _tasks_expected=$(jq '[.epics[].tasks[]] | length' "$PLAN_FILE")
+
+    # Count tasks from topological sort output
+    local sorted_count=0
+    for _ in $sorted_tasks; do
+        sorted_count=$((sorted_count + 1))
+    done
+
+    info "Tasks in plan: ${_tasks_expected}, tasks after topological sort: ${sorted_count}"
+
+    if [ "$sorted_count" -ne "$_tasks_expected" ]; then
+        warn "Topological sort produced ${sorted_count} tasks but plan has ${_tasks_expected} — some tasks may have unresolvable dependencies"
+    fi
+
+    # Build per-epic task counts for progress logging
+    local task_index=0
     for full_task_ref in $sorted_tasks; do
+        task_index=$((task_index + 1))
         local epic_id task_id
         # Uses :: separator from topological_sort to reliably split epic/task
         epic_id="${full_task_ref%%::*}"
         task_id="${full_task_ref#*::}"
 
-        create_task "$plan_json" "$epic_id" "$task_id"
+        info "  [${task_index}/${sorted_count}] ${epic_id}::${task_id}"
+        create_task "$epic_id" "$task_id"
     done
 
     # Phase 3: Wire dependencies
@@ -721,12 +974,12 @@ process_plan() {
         task_id="${full_task_ref#*::}"
 
         local task_deps
-        task_deps=$(echo "$plan_json" | jq --arg eid "$epic_id" --arg tid "$task_id" '
+        task_deps=$(jq --arg eid "$epic_id" --arg tid "$task_id" '
             .epics[] | select(.id == $eid) | .tasks[] | select(.id == $tid) | (.depends_on // []) | length
-        ')
+        ' "$PLAN_FILE")
 
         if [ "$task_deps" -gt 0 ]; then
-            wire_dependencies "$plan_json" "$epic_id" "$task_id"
+            wire_dependencies "$epic_id" "$task_id"
             has_deps=1
         fi
     done
@@ -738,10 +991,10 @@ process_plan() {
     # Coverage report
     section "Coverage Report"
     local total_sections mapped_sections unmapped_count context_count
-    total_sections=$(echo "$plan_json" | jq '.coverage.total_sections')
-    mapped_sections=$(echo "$plan_json" | jq '.coverage.mapped_sections')
-    unmapped_count=$(echo "$plan_json" | jq '(.coverage.unmapped // []) | length')
-    context_count=$(echo "$plan_json" | jq '(.coverage.context_only // []) | length')
+    total_sections=$(jq '.coverage.total_sections' "$PLAN_FILE")
+    mapped_sections=$(jq '.coverage.mapped_sections' "$PLAN_FILE")
+    unmapped_count=$(jq '(.coverage.unmapped // []) | length' "$PLAN_FILE")
+    context_count=$(jq '(.coverage.context_only // []) | length' "$PLAN_FILE")
 
     echo -e "  Total sections:  ${total_sections}"
     echo -e "  Mapped to tasks: ${mapped_sections}"
@@ -756,12 +1009,16 @@ process_plan() {
 
     # Total estimate
     local total_minutes
-    total_minutes=$(echo "$plan_json" | jq '[.epics[].tasks[] | .estimate_minutes // 0] | add // 0')
+    total_minutes=$(jq '[.epics[].tasks[] | .estimate_minutes // 0] | add // 0' "$PLAN_FILE")
     if [ "$total_minutes" -gt 0 ]; then
         local hours=$((total_minutes / 60))
         local mins=$((total_minutes % 60))
         echo -e "  Total estimate:  ${hours}h ${mins}m"
     fi
+
+    # Parallelism analysis
+    section "Parallelism Analysis"
+    parallelism_report
 }
 
 # --- Summary ---
@@ -772,8 +1029,29 @@ print_summary() {
 
     if [ "$DRY_RUN" -eq 1 ]; then
         echo -e "${BOLD}DRY RUN COMPLETE${NC}"
+        echo -e "  Tasks previewed: ${_tasks_expected}"
     else
-        success "Done: ${_epics_created} epics, ${_tasks_created} tasks, ${_deps_created} dependencies"
+        # Post-execution verification: expected vs actual
+        local _tasks_accounted=$((_tasks_created + _tasks_skipped))
+        if [ "$_tasks_expected" -gt 0 ] && [ "$_tasks_accounted" -ne "$_tasks_expected" ]; then
+            local missing=$((_tasks_expected - _tasks_accounted))
+            echo -e "${RED}${BOLD}VERIFICATION FAILED${NC}"
+            echo -e "${RED}  Expected: ${_tasks_expected} tasks${NC}"
+            echo -e "${RED}  Created:  ${_tasks_created} tasks${NC}"
+            echo -e "${RED}  Missing:  ${missing} tasks${NC}"
+            if [ "$_tasks_failed" -gt 0 ]; then
+                echo -e "${RED}  Failed:   ${_tasks_failed} tasks (see errors above)${NC}"
+            fi
+            echo -e "${RED}  DO NOT proceed — investigate missing tasks before continuing${NC}"
+            echo -e "${BOLD}=============================${NC}"
+            return 1
+        else
+            local summary="Done: ${_epics_created} epics, ${_tasks_created} tasks, ${_deps_created} dependencies"
+            if [ "$_tasks_skipped" -gt 0 ] || [ "$_epics_skipped" -gt 0 ]; then
+                summary="${summary} (skipped: ${_epics_skipped} epics, ${_tasks_skipped} tasks)"
+            fi
+            success "$summary"
+        fi
     fi
 
     if [ "$_warnings" -gt 0 ]; then
@@ -804,8 +1082,24 @@ main() {
                 DRY_RUN=1
                 shift
                 ;;
+            --strict)
+                STRICT=1
+                shift
+                ;;
+            --validate)
+                VALIDATE_ONLY=1
+                shift
+                ;;
+            --stats)
+                STATS_ONLY=1
+                shift
+                ;;
+            -q|--quiet)
+                QUIET=1
+                shift
+                ;;
             -h|--help)
-                echo "Usage: bd-from-plan [--dry-run] <plan-dir>"
+                echo "Usage: bd-from-plan [OPTIONS] <plan-dir>"
                 echo ""
                 echo "Plan directory must contain:"
                 echo "  _plan.json          Global metadata (version, source, prefix, workflow, coverage)"
@@ -813,6 +1107,10 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  --dry-run    Preview what would be created without creating anything"
+                echo "  --strict     Atomicity warnings become errors (blocks creation)"
+                echo "  --validate   Check-only mode: validate structure, atomicity, coverage (no creation)"
+                echo "  --stats      Show plan statistics: task counts, estimates, parallelism"
+                echo "  -q, --quiet  Suppress per-item output, show only summary and errors"
                 echo "  -h, --help   Show this help"
                 exit 0
                 ;;
@@ -831,31 +1129,97 @@ main() {
 
     # Require a plan directory argument
     if [ -z "$plan_dir" ]; then
-        die "usage: bd-from-plan [--dry-run] <plan-dir>"
+        die "usage: bd-from-plan [OPTIONS] <plan-dir>"
     fi
 
-    # Merge plan directory into single JSON
-    local plan_json
-    plan_json=$(merge_plan "$plan_dir")
+    # Merge plan directory into single JSON and write to temp file
+    PLAN_FILE="$TMPDIR_BD/plan.json"
+    merge_plan "$plan_dir" > "$PLAN_FILE"
 
-    # Detect beads prefix
+    # --- Stats-only mode: validate then show stats and exit ---
+    if [ "$STATS_ONLY" -eq 1 ]; then
+        if ! validate_plan 2>/dev/null; then
+            warn "Plan has validation errors — stats may be incomplete"
+        fi
+        plan_stats
+        return 0
+    fi
+
+    # --- Validate-only mode: check everything but don't create ---
+    if [ "$VALIDATE_ONLY" -eq 1 ]; then
+        section "Validating Plan (--validate mode)"
+
+        if ! validate_plan; then
+            die "plan validation failed"
+        fi
+        success "Plan structure is valid"
+
+        if ! check_cycles; then
+            die "circular dependencies detected — fix before proceeding"
+        fi
+        success "No circular dependencies"
+
+        # Coverage check
+        local unmapped_count
+        unmapped_count=$(jq '(.coverage.unmapped // []) | length' "$PLAN_FILE")
+        if [ "$unmapped_count" -eq 0 ]; then
+            success "Coverage: all sections mapped"
+        else
+            echo -e "${RED}Coverage: ${unmapped_count} unmapped section(s)${NC}"
+        fi
+
+        # Atomicity summary
+        if [ "$_atomicity_violations" -gt 0 ]; then
+            if [ "$STRICT" -eq 1 ]; then
+                echo -e "${RED}Atomicity: ${_atomicity_violations} violation(s) — FAIL (--strict)${NC}"
+            else
+                echo -e "${YELLOW}Atomicity: ${_atomicity_violations} warning(s) (use --strict to enforce)${NC}"
+            fi
+        else
+            success "Atomicity: all tasks pass all checks"
+        fi
+
+        # Show stats too
+        plan_stats
+
+        # Determine pass/fail: structural errors and unmapped sections always fail.
+        # Atomicity violations only fail when --strict is set.
+        local validation_failed=0
+        if [ "$unmapped_count" -gt 0 ]; then
+            validation_failed=1
+        fi
+        if [ "$STRICT" -eq 1 ] && [ "$_atomicity_violations" -gt 0 ]; then
+            validation_failed=1
+        fi
+
+        echo ""
+        if [ "$validation_failed" -eq 1 ]; then
+            echo -e "${RED}${BOLD}VALIDATION: FAIL${NC}"
+            return 1
+        else
+            echo -e "${GREEN}${BOLD}VALIDATION: PASS${NC}"
+            return 0
+        fi
+    fi
+
+    # --- Normal / dry-run / strict execution ---
     detect_beads_prefix
 
     # Validate
     section "Validating Plan"
-    if ! validate_plan "$plan_json"; then
+    if ! validate_plan; then
         die "plan validation failed"
     fi
     success "Plan structure is valid"
 
     # Cycle detection
-    if ! check_cycles "$plan_json"; then
+    if ! check_cycles; then
         die "circular dependencies detected — fix before proceeding"
     fi
     success "No circular dependencies"
 
     # Execute
-    process_plan "$plan_json"
+    process_plan
 
     # Summary
     print_summary

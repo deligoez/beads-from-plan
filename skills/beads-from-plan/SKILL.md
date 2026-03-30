@@ -273,6 +273,106 @@ Use this as calibration — if your count is significantly below, you're under-d
 | 1000 lines | 70–120 tasks |
 | 2000 lines | 120–200 tasks |
 
+### Splitting Heuristics Catalog
+
+When a task fails an atomicity check, use these patterns to split it:
+
+| Pattern in Title/Description | Split Into | Example |
+|------------------------------|-----------|---------|
+| "Create X with tests" | "Create X" + "Test X" | "Create UserModel" + "Test UserModel" |
+| "Create X, Y, and Z" | One task per noun | "Create Config" + "Create Migration" + "Create Model" |
+| "X and Y" (two verbs) | One task per verb | "Add config" + "Create migration" |
+| "Implement X with Y handling" | Core + edge cases | "Implement service" + "Add error handling" |
+| "Update X across A, B, C" | One task per target | "Update X in A" + "Update X in B" + "Update X in C" |
+| "Create X (model + migration + factory)" | One task per file concern | "Create X model" + "Create X migration" + "Create X factory" |
+| "Write docs for X" (multi-section) | One task per doc section | "Write X overview" + "Write X API reference" + "Write X examples" |
+| Task with >3 acceptance criteria | Split by acceptance criterion | Each criterion becomes its own task |
+
+**Anti-Patterns to Recognize:**
+
+| Anti-Pattern | Why It's Bad | Fix |
+|-------------|-------------|-----|
+| "Infrastructure: config, migration, model, service" | 4+ files, 4+ concerns | Split into 4 tasks |
+| "Implement feature end-to-end" | Crosses model/service/controller layers | One task per layer |
+| "Write all unit tests for X" | Multiple test classes, multiple concerns | One task per test file |
+| "Update documentation" (generic) | Multiple docs, multiple sections | One task per document |
+| "Refactor X and add Y" | Refactor ≠ feature, different concerns | Separate refactor and feature tasks |
+
+### Estimate Calibration Table
+
+Use these reference estimates when assigning `estimate_minutes`. An AI agent completing each task type should fall within these ranges:
+
+| Task Type | Typical Estimate | Notes |
+|-----------|-----------------|-------|
+| Config file (add/modify section) | 3–5 min | Single file, few lines |
+| Migration (create table) | 3–5 min | Schema definition only |
+| Eloquent/ORM model | 5–8 min | Fields, casts, relationships |
+| Factory/Seeder | 3–5 min | Definition + basic states |
+| Value Object / DTO | 5–8 min | Properties + construction |
+| Exception class | 2–3 min | Minimal boilerplate |
+| Service class (1–3 methods) | 10–15 min | Business logic, dependencies |
+| Controller endpoint | 8–12 min | Request handling, validation |
+| Middleware | 5–8 min | Single responsibility |
+| Test file (3–5 test cases) | 8–12 min | Setup + assertions |
+| Test file (1–2 test cases) | 3–5 min | Focused test |
+| Documentation page | 8–12 min | Prose + code examples |
+| Config/route registration | 2–3 min | One-liner additions |
+
+**If your estimate exceeds 15 minutes, the task is too broad.** Split it using the heuristics above.
+
+**If you're unsure about the estimate:** err on the side of smaller. A 5-minute task that takes 8 minutes is fine. A 15-minute task that takes 30 minutes means the task was under-decomposed.
+
+### Post-Decomposition Self-Check (MANDATORY)
+
+**After generating all epic JSON files, BEFORE running the script, perform this self-check:**
+
+```
+FOR each task in the plan:
+  1. Write the commit message for this task
+     → If you can't write ONE commit message, SPLIT
+  2. Name the files this task will create/modify
+     → If more than 2 files (excluding test), SPLIT
+  3. State the single concern this task addresses
+     → If you need "and" to describe it, SPLIT
+  4. Verify estimate_minutes ≤ 15
+     → If not, SPLIT using the calibration table
+```
+
+**Example self-check output (write this for each epic before saving):**
+
+```
+Epic: auth
+  task auth-user-model
+    commit: "feat(User): create model with migration"
+    files: app/Models/User.php, database/migrations/create_users.php
+    concern: User data model definition
+    estimate: 8m ✓
+  task auth-login-flow
+    commit: "feat(auth): implement login endpoint with JWT"
+    files: app/Http/Controllers/AuthController.php
+    concern: Login request handling
+    estimate: 12m ✓
+```
+
+If any task fails a check, split it and re-run the self-check on the sub-tasks.
+
+### Two-Pass Decomposition (MANDATORY for plans > 500 lines)
+
+**Pass 1: Rough Decomposition**
+- Read the plan (delegate to subagent for large plans)
+- Map sections to epics and rough tasks
+- Don't worry about perfect atomicity yet
+- Focus on 100% coverage and correct dependencies
+
+**Pass 2: Atomicity Refinement**
+- For each task from Pass 1, run ALL atomicity checks
+- Apply the Splitting Heuristics Catalog for any violations
+- Run the Post-Decomposition Self-Check
+- Verify estimates using the Calibration Table
+- Only write the JSON files AFTER Pass 2 is complete
+
+**Why two passes?** Single-pass decomposition optimizes for coverage (getting every section mapped) at the expense of atomicity (making each task small enough). Two passes let you nail coverage first, then refine granularity.
+
 ## Quality Gates
 
 The quality gate is a **single executable command** that combines all quality checks for the project. The agent discovers available commands from the project (composer.json, package.json, Makefile, CI config) and combines them with `&&`.
@@ -488,6 +588,8 @@ EOF
 
 Write each epic as a separate file. **Each file is small** (~1-3K tokens), minimizing AI output errors.
 
+**Required fields per task:** `id`, `title`, `source_sections`, `estimate_minutes` (positive integer, max 15). The script rejects tasks missing any of these.
+
 ```bash
 cat > "$PLAN_DIR/epic-auth.json" << 'EOF'
 {
@@ -534,18 +636,27 @@ EOF
 
 ## Step 6: Execute Plan
 
+**Always use `--strict` to enforce atomicity.** Use `--dry-run` first to preview.
+
 ```bash
-<base_directory>/scripts/bd-from-plan "$PLAN_DIR"
+# Step 6a: Dry-run with strict atomicity enforcement
+<base_directory>/scripts/bd-from-plan --strict --dry-run "$PLAN_DIR"
+
+# Step 6b: If dry-run passes, create tasks
+<base_directory>/scripts/bd-from-plan --strict "$PLAN_DIR"
 ```
 
 The script will:
-1. Validate the JSON
-2. Check coverage (fail if unmapped sections)
-3. Detect circular dependencies (fail if cycles)
-4. Create epics in order
-5. Create tasks in topological order
-6. Wire up dependencies
-7. Print summary with `bd ready` output
+1. Validate the JSON (structure + required fields including `estimate_minutes`)
+2. Check atomicity (in strict mode: violations = errors)
+3. Check coverage (fail if unmapped sections)
+4. Detect circular dependencies (fail if cycles)
+5. Create epics in order
+6. Create tasks in topological order (with progress logging)
+7. Wire up dependencies
+8. Show parallelism analysis (levels, critical path, speedup potential)
+9. Verify task counts (expected vs created — fail if mismatch)
+10. Print summary with `bd ready` output
 
 ## Step 7: Verify
 
@@ -636,6 +747,44 @@ This validates everything and shows what WOULD be created without actually creat
 
 ---
 
+# Strict Mode
+
+Use `--strict` to enforce atomicity as errors (not just warnings). **Recommended for production plans.**
+
+```bash
+<base_directory>/scripts/bd-from-plan --strict "$PLAN_DIR"
+# or combined with dry-run:
+<base_directory>/scripts/bd-from-plan --strict --dry-run "$PLAN_DIR"
+```
+
+In strict mode, any atomicity violation (estimate > 15m, conjunctions in title, >3 acceptance criteria, etc.) **blocks plan creation**. Fix all violations before proceeding.
+
+---
+
+# Validate Mode
+
+Check plan quality without creating anything and without needing `bd` initialized:
+
+```bash
+<base_directory>/scripts/bd-from-plan --validate "$PLAN_DIR"
+```
+
+Validates: structure, atomicity, coverage, circular dependencies. Reports pass/fail. Also shows plan statistics and parallelism analysis.
+
+---
+
+# Stats Mode
+
+View plan statistics without creating anything:
+
+```bash
+<base_directory>/scripts/bd-from-plan --stats "$PLAN_DIR"
+```
+
+Shows: task/epic counts, estimate min/avg/max, per-epic breakdown, parallelism levels, critical path, speedup potential, and plan size heuristic.
+
+---
+
 # Error Recovery
 
 | Error | Action |
@@ -674,9 +823,34 @@ After tasks are created, the agent works through them using this cycle:
 3. CLAIM   →  bd update <id> --claim         # Atomic claim (fails if taken)
 4. WORK    →  implement the task
 5. GATE    →  run quality gate command        # Must pass before commit
-6. COMMIT  →  commit using commit_strategy   # IMMEDIATELY after gate passes
-7. CLOSE   →  bd close <id> --reason="..."   # Mark complete
-8. NEXT    →  bd ready --pretty              # What's next?
+6. VERIFY  →  completion verification        # Confirm ALL acceptance criteria met
+7. COMMIT  →  commit using commit_strategy   # IMMEDIATELY after gate passes
+8. CLOSE   →  bd close <id> --reason="..."   # Mark complete with evidence
+9. NEXT    →  bd ready --pretty              # What's next?
+```
+
+### Completion Verification (Step 6 — MANDATORY)
+
+**After the quality gate passes but BEFORE committing, verify the full scope was implemented.**
+
+This step prevents the most common failure mode: quality gate passes (code compiles, tests pass) but the task's full scope was not implemented.
+
+```
+VERIFY checklist (run mentally for each task):
+  1. Re-read acceptance criteria:  bd show <id>
+  2. For each criterion, find the evidence:
+     - "Model exists" → file path + class name
+     - "Tests pass" → test file path + test count
+     - "Docs updated" → file path + section
+  3. Count check: if spec says "5 test cases", count them
+  4. Write the closure reason BEFORE closing — it must address each criterion
+```
+
+**If any criterion is not met, do NOT commit. Go back to step 4 (WORK).**
+
+The closure reason in step 8 should read like a checklist receipt:
+```bash
+bd close <id> --reason="Model at app/Models/Lock.php (12 fields). Migration 2024_01_create runs. Factory generates valid instances. 3/3 acceptance criteria met."
 ```
 
 ### Commit After Every Task (STRICT)
@@ -696,6 +870,95 @@ After tasks are created, the agent works through them using this cycle:
 
 The commit strategy (from `workflow.commit_strategy` or task-level override) determines the format.
 For `agentic-commits`: use the `/agentic-commits` skill to split changes into atomic, one-file-per-commit hunks.
+
+### Task Closure Rules (STRICT)
+
+**A task is either DONE or OPEN. There is no middle ground.**
+
+These rules prevent silent task loss — the #1 failure mode in large plan execution.
+
+#### Rule 1: No "Deferred" Closures
+
+**NEVER close a task with "deferred", "will be done later", or "to be handled in another task".**
+
+| Closure Reason | Allowed? | What To Do Instead |
+|---------------|----------|-------------------|
+| "Implemented with tests passing" | YES | Genuine completion |
+| "Deferred — will be done later" | NO | Leave the task OPEN |
+| "Will be handled during merge" | NO | Leave OPEN, add note |
+| "Skipped — not needed" | ONLY if acceptance criteria are provably N/A | Add proof to reason |
+
+If a task can't be completed now, leave it open. Use `bd update <id> --notes="Blocked by X"` to explain.
+
+#### Rule 2: No "Covered By Existing" Without Proof
+
+**To close a task as "covered by existing code/tests", you MUST provide grep proof.**
+
+Before closing with this reason:
+1. Read the task's acceptance criteria or spec test case list
+2. For EACH required item, `grep` the codebase to find it
+3. Include the grep results in the closure reason
+
+```bash
+# WRONG: "Covered by existing tests in FooTest"
+bd close <id> --reason="Covered by existing tests in FooTest"
+
+# RIGHT: Verify first, then close with evidence
+grep -l "testMethodName" tests/  # Find actual test
+bd close <id> --reason="All 5 test cases found in tests/FooTest.php: testA (L42), testB (L58), testC (L74), testD (L90), testE (L106)"
+```
+
+#### Rule 3: Quality Gate Green ≠ Task Complete
+
+**A passing quality gate means the code is correct, NOT that the task's full scope was implemented.**
+
+Before closing any task:
+1. Re-read the task description and acceptance criteria (`bd show <id>`)
+2. Compare the spec's requirements against what was actually implemented
+3. If the task specifies N test cases, verify N test cases exist (not just that tests pass)
+
+| Scenario | Quality Gate | Task Complete? |
+|----------|-------------|---------------|
+| 5/5 test cases written, all pass | GREEN | YES |
+| 3/5 test cases written, all pass | GREEN | NO — 2 missing |
+| All code written, no tests yet | RED or GREEN | NO — tests required |
+
+#### Rule 4: Documentation Tasks Require Content Verification
+
+**To close a documentation task, the target file MUST contain the documented content.**
+
+Before closing a docs task:
+1. Read the target file
+2. Verify the required content sections are present
+3. Include file path and line count in closure reason
+
+```bash
+# WRONG: "Documentation defined in spec — will be written during merge"
+# RIGHT: Verify the file, then close
+wc -l docs/typed-contracts.md  # "142 docs/typed-contracts.md"
+bd close <id> --reason="docs/typed-contracts.md written (142 lines), covers all 8 sections from spec"
+```
+
+#### Rule 5: Acceptance Criteria Validation
+
+**If a task has acceptance criteria, the closure reason MUST address each criterion.**
+
+```bash
+# Task acceptance: "Model exists. Migration runs. Factory works."
+# WRONG: bd close <id> --reason="Done"
+# RIGHT: bd close <id> --reason="Model at app/Models/Foo.php. Migration 2024_01_create_foo runs clean. Factory generates valid instances (tested)."
+```
+
+#### Closure Checklist (apply to EVERY task)
+
+```
+BEFORE running `bd close <id>`:
+  1. Re-read: bd show <id>  — read description + acceptance criteria
+  2. Verify scope: Does the implementation match the FULL spec, not just "enough to pass CI"?
+  3. Count items: If spec lists N items (test cases, docs sections, endpoints), verify N items exist
+  4. Check acceptance: Can you address each acceptance criterion with evidence?
+  5. Write reason: Closure reason must explain WHY criteria are met, not just "done"
+```
 
 ### Finding Work
 
@@ -776,6 +1039,9 @@ Before ending a session:
 |---------|---------|
 | `bd-from-plan plan-dir/` | Create tasks from plan directory |
 | `bd-from-plan --dry-run plan-dir/` | Preview without creating |
+| `bd-from-plan --strict plan-dir/` | Create with atomicity enforcement (recommended) |
+| `bd-from-plan --validate plan-dir/` | Check-only: validate structure, atomicity, coverage |
+| `bd-from-plan --stats plan-dir/` | Show plan statistics and parallelism analysis |
 | `bd ready --pretty` | Show next available tasks |
 | `bd show <id>` | Task details |
 | `bd update <id> --claim` | Claim a task before working |
