@@ -3,13 +3,16 @@
 
 load 'helpers/bd-test-helper'
 
-setup() {
-    setup_git_env
-    init_repo
+setup_file() {
+    init_template_repo
 }
 
-teardown() {
-    teardown_repo
+setup() {
+    init_repo_from_template
+}
+
+teardown_file() {
+    teardown_template_repo
 }
 
 # --- Real Execution ---
