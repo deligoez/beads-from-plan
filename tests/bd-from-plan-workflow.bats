@@ -3,13 +3,16 @@
 
 load 'helpers/bd-test-helper'
 
-setup() {
-    setup_git_env
-    init_repo
+setup_file() {
+    init_template_repo
 }
 
-teardown() {
-    teardown_repo
+setup() {
+    init_repo_from_template
+}
+
+teardown_file() {
+    teardown_template_repo
 }
 
 # --- Helper: create a plan dir from inline meta + epic JSON ---
@@ -29,7 +32,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"wf","workflow":{"quality_gate":"composer lint && composer test","commit_strategy":"conventional"},"coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task without own gate","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task without own gate","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "Created task:"
@@ -46,7 +49,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"ov","workflow":{"quality_gate":"composer lint && composer test && composer type"},"coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"docs","title":"Write docs","source_sections":["### 1.1"],"quality_gate":"composer lint"}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"docs","title":"Write docs","source_sections":["### 1.1"],"quality_gate":"composer lint","estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" "$plan_dir"
     [ "$status" -eq 0 ]
 
@@ -62,7 +65,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"cs","workflow":{"commit_strategy":"conventional"},"coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" "$plan_dir"
     [ "$status" -eq 0 ]
 
@@ -78,7 +81,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"cl","workflow":{"checklist_note":"- [ ] Run quality gate\n- [ ] Commit"},"coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task with checklist","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task with checklist","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" "$plan_dir"
     [ "$status" -eq 0 ]
 
@@ -173,7 +176,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"dr","workflow":{"quality_gate":"npm run lint && npm run test","commit_strategy":"agentic-commits","checklist_note":"- [ ] Run quality gate\n- [ ] Commit"},"coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"task1","title":"Task","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "Plan structure is valid"
