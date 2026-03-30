@@ -3,12 +3,15 @@
 
 load 'helpers/bd-test-helper'
 
-setup() {
-    setup_git_env
-    init_repo
+setup_file() {
+    init_shared_repo
 }
 
-teardown() {
+setup() {
+    cd "$REPO"
+}
+
+teardown_file() {
     teardown_repo
 }
 
@@ -53,7 +56,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"ms","coverage":{"total_sections":5,"mapped_sections":4,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"wide","title":"Wide task","source_sections":["### 1.1","### 1.2","### 1.3"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"wide","title":"Wide task","source_sections":["### 1.1","### 1.2","### 1.3"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY"
@@ -65,7 +68,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"ts","coverage":{"total_sections":4,"mapped_sections":3,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"pair","title":"Paired task","source_sections":["### 1.1","### 1.2"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"pair","title":"Paired task","source_sections":["### 1.1","### 1.2"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_not_contains "ATOMICITY"
@@ -79,7 +82,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"ld","coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        "{\"id\":\"core\",\"title\":\"Core\",\"source_sections\":[\"## 1\"],\"tasks\":[{\"id\":\"verbose\",\"title\":\"Verbose task\",\"description\":\"${long_desc}\",\"source_sections\":[\"### 1.1\"]}]}")
+        "{\"id\":\"core\",\"title\":\"Core\",\"source_sections\":[\"## 1\"],\"tasks\":[{\"id\":\"verbose\",\"title\":\"Verbose task\",\"description\":\"${long_desc}\",\"source_sections\":[\"### 1.1\"],\"estimate_minutes\":10}]}")
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY"
@@ -92,7 +95,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"conj","coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"multi","title":"Add config and create migration","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"multi","title":"Add config and create migration","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY"
@@ -103,7 +106,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"conj","coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"multi","title":"Create config, migration, model","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"multi","title":"Create config, migration, model","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY"
@@ -114,7 +117,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"conj","coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"multi","title":"Lock manager + handle implementation","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"multi","title":"Lock manager + handle implementation","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY"
@@ -127,7 +130,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"lt","coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"wordy","title":"Create the new fancy lock infrastructure service manager handler","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"wordy","title":"Create the new fancy lock infrastructure service manager handler","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     assert_output_contains "ATOMICITY"
@@ -139,7 +142,7 @@ _make_plan_dir() {
     local plan_dir
     plan_dir=$(_make_plan_dir \
         '{"version":1,"prefix":"ot","coverage":{"total_sections":3,"mapped_sections":2,"unmapped":[],"context_only":["# T"]}}' \
-        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"ok","title":"Create MachineStateLock model with factory test","source_sections":["### 1.1"]}]}')
+        '{"id":"core","title":"Core","source_sections":["## 1"],"tasks":[{"id":"ok","title":"Create MachineStateLock model with factory test","source_sections":["### 1.1"],"estimate_minutes":10}]}')
     run "$BD_FROM_PLAN" --dry-run "$plan_dir"
     [ "$status" -eq 0 ]
     # 7 words = no word count warning (may trigger 'with' conjunction warning though)
